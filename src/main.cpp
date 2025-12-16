@@ -1,68 +1,81 @@
 #include <Arduino.h>
+// Pinos
+#define PWM_TEMP 14
+#define PWM_COOLER 25
+#define SENSOR_TEMP 26
+#define SENSOR_FLUXO 27
 
-// --- Pinos ---
-const int PIN_NTC = 26;
-const int PIN_COOLER = 25;
+// Variáveis
+const int resolution = 4095;                        // Resolução do conversor AD do ESP
+volatile int pulsos = 0;                            // Pulsos do sensor de fluxo
+unsigned long tempoAnt = 0, tempoAtual = 0, dT = 0; // Variáveis para manipulação do timer
+float temperatura = 0, resistencia = 0, vazao = 0;  // Variáveis para cálculo da temperatura e vazão
+int dutycycleTemp = 0, dutycycleCooler = 0;         // Duty Cycle do PWM do transistor e do cooler
 
-// --- Configuração do PWM (Cooler) ---
-// O ESP32 usa canais LEDC para gerar PWM
-const int PWM_CHANNEL = 0;  // Canal 0 (0 a 15)
-const int PWM_FREQ = 25000; // Frequência (25kHz é bom para ventoinhas para evitar zumbido)
-const int PWM_RES = 8;      // Resolução de 8 bits (Valores de 0 a 255)
+// Constantes do NTC e sistema
+double Vs = 3.3;    // Tensão de referência do ESP32
+double R1 = 10000;  // Resistor fixo de 10kΩ no divisor de tensão
+double Beta = 3950; // Coeficiente beta do NTC
+double To = 298.15; // Temperatura de referência (25°C em Kelvin)
+double Ro = 10000;  // Resistência nominal do NTC a 25°C
 
-// --- Parâmetros do NTC (Mesmos de antes) ---
-const float BETA = 3950.0;
-const float R_SERIE = 10000.0;
-const float R_NTC_25 = 10000.0;
-const float T0_KELVIN = 298.15;
+// Rotina da interrupção que realiza leitura do sensor de fluxo
+void lerFluxo()
+{
+  pulsos++;
+}
 
 void setup()
 {
   Serial.begin(115200);
-  analogReadResolution(12);
 
-  // --- Configuração do PWM para o Cooler ---
-  // Nota: Se estiver usando a versão mais recente do ESP32 Core (v3.0+),
-  // a função mudou para ledcAttach(PIN_COOLER, PWM_FREQ, PWM_RES);
-  // Mas no PlatformIO padrão geralmente usa-se a sintaxe abaixo:
+  pinMode(SENSOR_TEMP, INPUT);
+  pinMode(SENSOR_FLUXO, INPUT);
+  pinMode(PWM_TEMP, OUTPUT);
+  pinMode(PWM_COOLER, OUTPUT);
 
-  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RES);
-  ledcAttachPin(PIN_COOLER, PWM_CHANNEL);
+  dutycycleTemp = 50; // Duty Cycle setado
+  dutycycleCooler = 0;
 
-  Serial.println("Sistema de Controle de Temperatura Iniciado");
+  ledcAttach(PWM_TEMP, 1000, 8);
+  ledcAttach(PWM_COOLER, 1000, 8);
+
+  ledcWrite(PWM_TEMP, (dutycycleTemp * 255)); // Mandando sinais PWM
+  ledcWrite(PWM_COOLER, (dutycycleCooler * 255) / 100);
+
+  attachInterrupt(digitalPinToInterrupt(SENSOR_FLUXO), lerFluxo, RISING); // Interrupção para sensor de fluxo
 }
 
 void loop()
 {
-  // --- 1. Leitura da Temperatura (Código anterior) ---
-  float leituraADC = 0;
-  for (int i = 0; i < 10; i++)
+  tempoAtual = millis();
+  dT = tempoAtual - tempoAnt;
+
+  // Tempo de Amostragem 2000ms = 2s
+  if (dT >= 2000)
   {
-    leituraADC += analogRead(PIN_NTC);
-    delay(5);
+    tempoAnt = tempoAtual;
+
+    // Leitura do NTC e cálculo da temperatura diretamente no loop
+    int leituraADC = analogRead(SENSOR_TEMP);
+
+    // Cálculo da temperatura com a equação Steinhart-Hart
+    double Vout = leituraADC * Vs / resolution;       // Converte a leitura ADC para tensão
+    double Rt = R1 * Vout / (Vs - Vout);              // Calcula a resistência do NTC
+    temperatura = 1 / (1 / To + log(Rt / Ro) / Beta); // Equação de Steinhart-Hart
+    temperatura = temperatura - 273.15;               // Converte de Kelvin para Celsius
+
+    // Cálculo da vazão
+    vazao = pulsos; // Nota: Aqui está pegando apenas a contagem bruta de pulsos
+
+    pulsos = 0;
+
+    // Exibição da vazão e temperatura no Serial
+    Serial.println(">Vazão:");
+    Serial.print(vazao);
+    Serial.println("L/s");
+    Serial.println(">Temperatura:");
+    Serial.print(temperatura);
+    Serial.println("°C");
   }
-  leituraADC /= 10.0;
-
-  float resistenciaAtual = R_SERIE / ((4095.0 / leituraADC) - 1.0);
-  float temperaturaK = 1.0 / ((1.0 / T0_KELVIN) + (log(resistenciaAtual / R_NTC_25) / BETA));
-  float temperaturaC = temperaturaK - 273.15;
-
-  // --- 2. Lógica de Controle do Cooler ---
-  int velocidadeCooler = 255; // 0 a 255
-
-  // Exemplo de lógica:
-  // < 30°C -> Desligado (0)
-  // > 30°C -> Começa a girar devagar
-  // > 40°C -> Velocidade Máxima (255)
-
-  // Envia o sinal para o pino D25
-  ledcWrite(PWM_CHANNEL, velocidadeCooler);
-
-  // --- 3. Debug ---
-  Serial.print("Temp: ");
-  Serial.print(temperaturaC, 1); // 1 casa decimal
-  Serial.print(" °C | Cooler PWM: ");
-  Serial.println(velocidadeCooler);
-
-  delay(500);
 }
