@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Controle e Automação</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Monitoramento do Sistema</h1>
+        <p>Status em Tempo Real</p>
+    </header>
+
+    <div class="container">
+        <!-- Cards de Status -->
+        <div class="cards-grid">
+            <div class="card card-temp">
+                <h3>Temperatura</h3>
+                <div class="value" id="val-temp">-- °C</div>
+                <div class="status" id="status-temp">Aguardando...</div>
+            </div>
+            <div class="card card-fluxo">
+                <h3>Fluxo de Água</h3>
+                <div class="value" id="val-fluxo">-- L/min</div>
+            </div>
+            <div class="card card-cooler">
+                <h3>Cooler (PWM)</h3>
+                <div class="value" id="val-cooler">-- %</div>
+            </div>
+            <div class="card card-res">
+                <h3>Resistência</h3>
+                <div class="value" id="val-res">OFF</div>
+            </div>
+        </div>
+
+        <!-- Gráficos -->
+        <div class="charts-grid">
+            <div class="chart-container">
+                <canvas id="chartTemp"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="chartFluxo"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="chartCooler"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="chartRes"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
