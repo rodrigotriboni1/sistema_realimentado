@@ -55,7 +55,7 @@ void setup()
   Serial.println(WiFi.localIP());
 
   dutycycleTemp = 50; // Duty Cycle setado (Exemplo)
-  dutycycleCooler = 0; // Exemplo
+  dutycycleCooler = 50; // Exemplo
 
   ledcAttach(PWM_TEMP, 1000, 8);
   ledcAttach(PWM_COOLER, 1000, 8);
