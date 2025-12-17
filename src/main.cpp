@@ -9,9 +9,9 @@
 #define SENSOR_FLUXO 27
 
 // Configurações de Rede e Servidor
-const char* ssid = "SEU_WIFI_SSID";
-const char* password = "SEU_WIFI_PASSWORD";
-const char* serverName = "http://seusite.com/insert_data.php"; // Substitua pela URL da HostGator
+const char* ssid = "DIGIE";
+const char* password = "DIGIE111";
+const char* serverName = "http://rodrigotriboni.com/insert_data.php"; // Substitua pela URL da HostGator
 
 // Variáveis
 const int resolution = 4095;                        // Resolução do conversor AD do ESP
