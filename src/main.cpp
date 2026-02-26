@@ -1,17 +1,10 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
 
 // Pinos
 #define PWM_TEMP 14
 #define PWM_COOLER 25
 #define SENSOR_TEMP 26
 #define SENSOR_FLUXO 27
-
-// Configurações de Rede e Servidor
-const char* ssid = "DIGIE";
-const char* password = "DIGIE111";
-const char* serverName = "http://rodrigotriboni.com/insert_data.php"; // Substitua pela URL da HostGator
 
 // Variáveis
 const int resolution = 4095;                        // Resolução do conversor AD do ESP
@@ -42,17 +35,6 @@ void setup()
   pinMode(SENSOR_FLUXO, INPUT);
   pinMode(PWM_TEMP, OUTPUT);
   pinMode(PWM_COOLER, OUTPUT);
-
-  // Conexão WiFi
-  WiFi.begin(ssid, password);
-  Serial.println("Conectando ao WiFi");
-  while(WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.print("Conectado ao IP: ");
-  Serial.println(WiFi.localIP());
 
   dutycycleTemp = 50; // Duty Cycle setado (Exemplo)
   dutycycleCooler = 50; // Exemplo
@@ -101,34 +83,5 @@ void loop()
     // Exibição Serial
     Serial.printf("Temp: %.2f C | Vazao: %.2f L/min | Cooler: %d%% | Resistencia: %s\n", 
                   temperatura, vazao, dutycycleCooler, estadoResistencia ? "ON" : "OFF");
-
-    // Envio HTTP POST
-    if(WiFi.status() == WL_CONNECTED){
-      HTTPClient http;
-      http.begin(serverName);
-      http.addHeader("Content-Type", "application/json");
-
-      // Criar JSON manualmente
-      String json = "{";
-      json += "\"temperatura\":" + String(temperatura) + ",";
-      json += "\"fluxo\":" + String(vazao) + ",";
-      json += "\"pwm_cooler\":" + String(dutycycleCooler) + ",";
-      json += "\"estado_resistencia\":" + String(estadoResistencia); // 1 ou 0
-      json += "}";
-
-      int httpResponseCode = http.POST(json);
-
-      if(httpResponseCode > 0){
-        String response = http.getString();
-        Serial.println(httpResponseCode);
-        Serial.println(response);
-      } else {
-        Serial.print("Erro no envio POST: ");
-        Serial.println(httpResponseCode);
-      }
-      http.end();
-    } else {
-      Serial.println("WiFi Desconectado");
-    }
   }
 }
