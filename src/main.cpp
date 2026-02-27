@@ -36,8 +36,8 @@ void setup()
   pinMode(PWM_TEMP, OUTPUT);
   pinMode(PWM_COOLER, OUTPUT);
 
-  dutycycleTemp = 50; // Duty Cycle setado (Exemplo)
-  dutycycleCooler = 50; // Exemplo
+  dutycycleTemp = 50;   // Duty Cycle setado (Exemplo)
+  dutycycleCooler = 0;  // Cooler desligado para coleta de temperatura
 
   ledcAttach(PWM_TEMP, 1000, 8);
   ledcAttach(PWM_COOLER, 1000, 8);
