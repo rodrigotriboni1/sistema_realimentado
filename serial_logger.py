@@ -12,7 +12,7 @@ import time
 # Configurações
 PORTA_SERIAL = "COM6"
 BAUD_RATE = 115200
-ARQUIVO_CSV = "dados_temperatura.csv"
+ARQUIVO_CSV = "dados_fluxo.csv"
 
 
 def extrair_dados(linha: str) -> Optional[dict]:
@@ -71,7 +71,7 @@ def main():
                             dados["resistencia"],
                         ])
                         csvfile.flush()
-                        print(f"[{timestamp}] Temp: {dados['temperatura']:.2f}°C | Salvo em {ARQUIVO_CSV}")
+                        print(f"[{timestamp}] Temp: {dados['temperatura']:.2f}°C | Vazao: {dados['vazao']:.2f} L/min | Salvo em {ARQUIVO_CSV}")
 
                 time.sleep(0.1)
 

@@ -36,16 +36,23 @@ void setup()
   pinMode(PWM_TEMP, OUTPUT);
   pinMode(PWM_COOLER, OUTPUT);
 
-  dutycycleTemp = 50;   // Duty Cycle setado (Exemplo)
-  dutycycleCooler = 0;  // Cooler desligado para coleta de temperatura
+  dutycycleTemp = 0;    // Resistência desligada
+  dutycycleCooler = 0;  // Cooler desligado
 
   ledcAttach(PWM_TEMP, 1000, 8);
   ledcAttach(PWM_COOLER, 1000, 8);
 
-  ledcWrite(PWM_TEMP, (dutycycleTemp * 255) / 100); 
-  ledcWrite(PWM_COOLER, (dutycycleCooler * 255) / 100);
+  ledcWrite(PWM_TEMP, 0);
+  ledcWrite(PWM_COOLER, 0);
 
-  attachInterrupt(digitalPinToInterrupt(SENSOR_FLUXO), lerFluxo, RISING); // Interrupção para sensor de fluxo
+  attachInterrupt(digitalPinToInterrupt(SENSOR_FLUXO), lerFluxo, RISING);
+
+  delay(2000);  // Espera 2 segundos
+
+  dutycycleCooler = 100;  // Liga cooler no máximo
+  ledcWrite(PWM_COOLER, 255);
+
+  Serial.println("Cooler ligado no maximo - coleta de fluxo iniciada");
 }
 
 void loop()
