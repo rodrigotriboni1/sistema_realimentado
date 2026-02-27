@@ -12,7 +12,7 @@ import time
 # Configurações
 PORTA_SERIAL = "COM6"
 BAUD_RATE = 115200
-ARQUIVO_CSV = "dados_fluxo.csv"
+ARQUIVO_CSV = "dados_ensaio_ft.csv"
 
 
 def extrair_dados(linha: str) -> Optional[dict]:

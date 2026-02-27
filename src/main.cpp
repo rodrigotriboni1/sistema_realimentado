@@ -14,6 +14,13 @@ float temperatura = 0, resistencia = 0, vazao = 0;  // Variáveis para cálculo 
 int dutycycleTemp = 0, dutycycleCooler = 0;         // Duty Cycle do PWM do transistor e do cooler
 bool estadoResistencia = false;
 
+// Ensaio: 0=aguardando estabilização, 1=cooler ligado, coletando até novo regime
+int faseEnsaio = 0;  // 0=FASE_ESTABILIZACAO, 1=FASE_COOLER_LIGADO
+const int N_AMOSTRAS_ESTAB = 30;                    // Amostras para verificar estabilização
+float historicoTemp[N_AMOSTRAS_ESTAB];
+int idxHistorico = 0;
+bool historicoPreenchido = false;
+
 // Constantes do NTC e sistema
 double Vs = 3.3;    // Tensão de referência do ESP32
 double R1 = 10000;  // Resistor fixo de 10kΩ no divisor de tensão
@@ -36,23 +43,18 @@ void setup()
   pinMode(PWM_TEMP, OUTPUT);
   pinMode(PWM_COOLER, OUTPUT);
 
-  dutycycleTemp = 0;    // Resistência desligada
-  dutycycleCooler = 0;  // Cooler desligado
+  dutycycleTemp = 100;   // Resistência PWM máximo
+  dutycycleCooler = 0;   // Cooler desligado
 
   ledcAttach(PWM_TEMP, 1000, 8);
   ledcAttach(PWM_COOLER, 1000, 8);
 
-  ledcWrite(PWM_TEMP, 0);
+  ledcWrite(PWM_TEMP, 255);
   ledcWrite(PWM_COOLER, 0);
 
   attachInterrupt(digitalPinToInterrupt(SENSOR_FLUXO), lerFluxo, RISING);
 
-  delay(2000);  // Espera 2 segundos
-
-  dutycycleCooler = 100;  // Liga cooler no máximo
-  ledcWrite(PWM_COOLER, 255);
-
-  Serial.println("Cooler ligado no maximo - coleta de fluxo iniciada");
+  Serial.println("Ensaio iniciado: Resistencia 100% | Cooler 0% | Aguardando estabilizacao...");
 }
 
 void loop()
@@ -86,6 +88,29 @@ void loop()
 
     // Estado da Resistência (Baseado no DutyCycle > 0)
     estadoResistencia = (dutycycleTemp > 0);
+
+    // Lógica do ensaio: verificar estabilização e ligar cooler
+    if (faseEnsaio == 0) {
+      historicoTemp[idxHistorico] = temperatura;
+      idxHistorico++;
+      if (idxHistorico >= N_AMOSTRAS_ESTAB) {
+        historicoPreenchido = true;
+        idxHistorico = 0;
+      }
+      if (historicoPreenchido) {
+        float tempMin = historicoTemp[0], tempMax = historicoTemp[0];
+        for (int i = 1; i < N_AMOSTRAS_ESTAB; i++) {
+          if (historicoTemp[i] < tempMin) tempMin = historicoTemp[i];
+          if (historicoTemp[i] > tempMax) tempMax = historicoTemp[i];
+        }
+        if ((tempMax - tempMin) < 0.3f) {
+          faseEnsaio = 1;
+          dutycycleCooler = 100;
+          ledcWrite(PWM_COOLER, 255);
+          Serial.println("Temperatura estabilizada! Cooler ligado 100% - coleta ate novo regime");
+        }
+      }
+    }
 
     // Exibição Serial
     Serial.printf("Temp: %.2f C | Vazao: %.2f L/min | Cooler: %d%% | Resistencia: %s\n", 
