@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plataforma Ensaios Térmicos</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <header class="site-header">
+      <h1>Plataforma de Ensaios Térmicos</h1>
+      <p class="subtitle">Identificação das funções de transferência G_T(s), G_F(s) e G_FT(s)</p>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab-btn active" data-tab="dashboard" role="tab" aria-selected="true">Dashboard</button>
+      <button type="button" class="tab-btn" data-tab="fase1" role="tab" aria-selected="false">Fase 1: G_T(s)</button>
+      <button type="button" class="tab-btn" data-tab="fase2" role="tab" aria-selected="false">Fase 2: G_F(s)</button>
+      <button type="button" class="tab-btn" data-tab="fase3" role="tab" aria-selected="false">Fase 3: G_FT(s)</button>
+      <button type="button" class="tab-btn" data-tab="controle" role="tab" aria-selected="false">Controle</button>
+      <button type="button" class="tab-btn" data-tab="monitor" role="tab" aria-selected="false">Monitor</button>
+    </nav>
+
+    <main class="tab-content-wrapper">
+      <!-- Dashboard -->
+      <section id="panel-dashboard" class="tab-panel active" role="tabpanel">
+        <div class="dashboard-cards">
+          <div class="dashboard-card">
+            <h3>Resumo ao vivo</h3>
+            <p id="dashboardLiveTemp" class="dashboard-value">— °C</p>
+            <p id="dashboardLiveVazao" class="dashboard-value">— L/min</p>
+            <p class="dashboard-hint">Conecte o Monitor para ver dados ao vivo.</p>
+          </div>
+          <div class="dashboard-card">
+            <h3>Testes salvos</h3>
+            <p id="dashboardTestCount" class="dashboard-value">0</p>
+            <p class="dashboard-hint">Envie CSVs abaixo para usar nas fases.</p>
+          </div>
+          <div class="dashboard-card dashboard-card-links">
+            <h3>Acesso rápido</h3>
+            <button type="button" class="link-tab" data-tab="fase1">Fase 1: G_T(s)</button>
+            <button type="button" class="link-tab" data-tab="fase2">Fase 2: G_F(s)</button>
+            <button type="button" class="link-tab" data-tab="fase3">Fase 3: G_FT(s)</button>
+            <button type="button" class="link-tab" data-tab="controle">Controle</button>
+            <button type="button" class="link-tab" data-tab="monitor">Monitor em tempo real</button>
+          </div>
+        </div>
+        <section class="card">
+          <h2>Upload de teste</h2>
+          <p>Envie um CSV com colunas: <code>timestamp, temperatura_C, vazao_L_min, cooler_%, resistencia</code>. Use os testes nas abas de cada fase.</p>
+          <div class="upload-area">
+            <input type="file" id="fileInput" accept=".csv">
+            <button type="button" id="btnUpload">Enviar e salvar</button>
+          </div>
+          <p id="uploadStatus" class="status"></p>
+        </section>
+        <section class="card">
+          <h2>Testes salvos</h2>
+          <div class="tests-header">
+            <button type="button" id="btnRefreshTests">Atualizar lista</button>
+          </div>
+          <ul id="testList" class="test-list"></ul>
+        </section>
+      </section>
+
+      <!-- Fase 1: G_T(s) -->
+      <section id="panel-fase1" class="tab-panel" role="tabpanel" hidden>
+        <section class="card phase-card">
+          <h2>Fase 1 — G_T(s): Temperatura × Resistência</h2>
+          <p><strong>Função de transferência</strong> que relaciona a temperatura de saída com a tensão aplicada à resistência.</p>
+          <ul class="phase-steps">
+            <li>Cooler desligado, caixa em temperatura ambiente.</li>
+            <li>Aplique PWM 100% na resistência. O código coleta temperatura a cada período de amostragem.</li>
+            <li>Continue até regime permanente. Subtraia a temperatura ambiente no processamento.</li>
+            <li>Determine G_T(s). Anote a temperatura em regime permanente (setpoint máximo permitido).</li>
+          </ul>
+        </section>
+        <section class="card">
+          <h2>Análise G_T(s)</h2>
+          <label>Teste (use um CSV enviado no Dashboard): <select id="selectTestGT"><option value="">— Selecione —</option></select></label>
+          <button type="button" id="btnAnalyzeGT">Analisar</button>
+          <p id="analyzeStatusGT" class="status"></p>
+        </section>
+        <section class="card result-card result-phase" id="resultSectionGT" hidden>
+          <h2>Resultado G_T(s)</h2>
+          <div class="ft-formula" id="ftFormulaGT"></div>
+          <div class="ft-params" id="ftParamsGT"></div>
+          <div class="chart-container"><canvas id="chartGT"></canvas></div>
+        </section>
+      </section>
+
+      <!-- Fase 2: G_F(s) -->
+      <section id="panel-fase2" class="tab-panel" role="tabpanel" hidden>
+        <section class="card phase-card">
+          <h2>Fase 2 — G_F(s): Vazão × Cooler</h2>
+          <p><strong>Função de transferência</strong> que relaciona a vazão de saída com a tensão aplicada ao cooler.</p>
+          <ul class="phase-steps">
+            <li>Cooler desligado. Aplique PWM 100% no cooler.</li>
+            <li>Colete uma amostra de vazão a cada período de amostragem até regime permanente.</li>
+            <li>Determine G_F(s). Anote a vazão em regime permanente (setpoint máximo). O período de amostragem da temperatura não é adequado para a planta de vazão (resposta mais rápida).</li>
+          </ul>
+        </section>
+        <section class="card">
+          <h2>Análise G_F(s)</h2>
+          <label>Teste: <select id="selectTestGF"><option value="">— Selecione —</option></select></label>
+          <button type="button" id="btnAnalyzeGF">Analisar</button>
+          <p id="analyzeStatusGF" class="status"></p>
+        </section>
+        <section class="card result-card result-phase" id="resultSectionGF" hidden>
+          <h2>Resultado G_F(s)</h2>
+          <div class="ft-formula" id="ftFormulaGF"></div>
+          <div class="ft-params" id="ftParamsGF"></div>
+          <div class="chart-container"><canvas id="chartGF"></canvas></div>
+        </section>
+      </section>
+
+      <!-- Fase 3: G_FT(s) -->
+      <section id="panel-fase3" class="tab-panel" role="tabpanel" hidden>
+        <section class="card phase-card">
+          <h2>Fase 3 — G_FT(s): Perturbação Temperatura × Cooler</h2>
+          <p><strong>Função de transferência</strong> que relaciona a perturbação na temperatura de saída com a tensão aplicada ao cooler.</p>
+          <ul class="phase-steps">
+            <li>Resistência com PWM máximo. Aguarde a temperatura estabilizar.</li>
+            <li>Aplique PWM 100% no cooler. Colete temperatura a cada período de amostragem até novo regime permanente.</li>
+            <li>Subtraia a temperatura inicial. Determine G_FT(s).</li>
+          </ul>
+        </section>
+        <section class="card">
+          <h2>Análise G_FT(s)</h2>
+          <label>Teste: <select id="selectTestGFT"><option value="">— Selecione —</option></select></label>
+          <button type="button" id="btnAnalyzeGFT">Analisar</button>
+          <p id="analyzeStatusGFT" class="status"></p>
+        </section>
+        <section class="card result-card result-phase" id="resultSectionGFT" hidden>
+          <h2>Resultado G_FT(s)</h2>
+          <div class="ft-formula" id="ftFormulaGFT"></div>
+          <div class="ft-params" id="ftParamsGFT"></div>
+          <div class="chart-container"><canvas id="chartGFT"></canvas></div>
+        </section>
+      </section>
+
+      <!-- Controle -->
+      <section id="panel-controle" class="tab-panel" role="tabpanel" hidden>
+        <section class="card control-card">
+          <h2>Controle manual</h2>
+          <p>Resistência e cooler (0–100%). O ESP32 consulta a API e aplica os valores.</p>
+          <div class="control-panel">
+            <div class="control-row">
+              <label><span class="control-label">Resistência</span><span class="control-value" id="resistenciaValue">0</span>%</label>
+              <input type="range" id="sliderResistencia" min="0" max="100" value="0">
+              <div class="control-quick">
+                <button type="button" data-control="resistencia" data-value="0">0%</button>
+                <button type="button" data-control="resistencia" data-value="50">50%</button>
+                <button type="button" data-control="resistencia" data-value="100">100%</button>
+              </div>
+            </div>
+            <div class="control-row">
+              <label><span class="control-label">Cooler</span><span class="control-value" id="coolerValue">0</span>%</label>
+              <input type="range" id="sliderCooler" min="0" max="100" value="0">
+              <div class="control-quick">
+                <button type="button" data-control="cooler" data-value="0">0%</button>
+                <button type="button" data-control="cooler" data-value="50">50%</button>
+                <button type="button" data-control="cooler" data-value="100">100%</button>
+              </div>
+            </div>
+          </div>
+          <p id="controlStatus" class="status"></p>
+        </section>
+      </section>
+
+      <!-- Monitor -->
+      <section id="panel-monitor" class="tab-panel" role="tabpanel" hidden>
+        <section class="card monitor-card">
+          <h2>Monitor em tempo real</h2>
+          <p>Dados ao vivo via ponte Serial → API. Rode <code>serial_to_api.py</code> com o ESP32 na serial.</p>
+          <div class="monitor-status">
+            <span id="wsStatus" class="ws-status">Desconectado</span>
+            <button type="button" id="btnWsToggle" class="btn-ws-toggle">Conectar</button>
+          </div>
+          <div class="monitor-values">
+            <div class="monitor-row"><span class="monitor-label">Temperatura</span><span id="liveTemp" class="monitor-value">—</span> °C</div>
+            <div class="monitor-row"><span class="monitor-label">Vazão</span><span id="liveVazao" class="monitor-value">—</span> L/min</div>
+            <div class="monitor-row"><span class="monitor-label">Cooler</span><span id="liveCooler" class="monitor-value">—</span> %</div>
+            <div class="monitor-row"><span class="monitor-label">Resistência</span><span id="liveResistencia" class="monitor-value">—</span></div>
+            <div class="monitor-row"><span class="monitor-label">Última amostra</span><span id="liveTimestamp" class="monitor-value">—</span></div>
+          </div>
+          <div class="chart-container chart-live">
+            <canvas id="chartLive"></canvas>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
