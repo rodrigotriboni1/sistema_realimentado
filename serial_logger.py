@@ -6,7 +6,8 @@ Formato esperado do ESP32:
   Cabeçalho             →  t_ms,vazao_Lmin,fase
   Dados                 →  <inteiro>,<float>,<INICIAL|DEGRAU|CONCLUIDO>
 
-Saída: arquivo CSV pronto para plotagem e identificação de G_F(s).
+Saída: CSV no formato padrão do projeto
+  timestamp, temperatura_C, vazao_L_min, cooler_%, resistencia
 """
 
 import serial
@@ -20,8 +21,7 @@ PORTA_SERIAL = "COM6"
 BAUD_RATE    = 115200
 ARQUIVO_CSV  = f"ensaio_GF_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
-COLUNAS_ESP  = ["t_ms", "vazao_Lmin", "fase"]   # cabeçalho enviado pelo ESP32
-COLUNAS_CSV  = ["t_ms", "vazao_Lmin", "fase"]    # colunas gravadas no arquivo
+COLUNAS_CSV  = ["timestamp", "temperatura_C", "vazao_L_min", "cooler_%", "resistencia"]
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -72,7 +72,7 @@ def main():
     caminho = Path(ARQUIVO_CSV)
     print(f"Gravando em: {caminho.resolve()}")
     print("-" * 60)
-    print(f"{'t_ms':>8}  {'vazao (L/min)':>14}  fase")
+    print(f"{'t_ms':>8}  {'vazao (L/min)':>14}  cooler  fase")
     print("-" * 60)
 
     amostras = 0
@@ -103,11 +103,22 @@ def main():
                 if dados is None:
                     continue
 
-                writer.writerow(dados)
+                # Mapeia fase → cooler_%
+                cooler_pct = 0 if dados["fase"] == "INICIAL" else 100
+
+                linha_csv = {
+                    "timestamp":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "temperatura_C": 0.0,
+                    "vazao_L_min":   dados["vazao_Lmin"],
+                    "cooler_%":      cooler_pct,
+                    "resistencia":   "OFF",
+                }
+
+                writer.writerow(linha_csv)
                 csvfile.flush()
                 amostras += 1
 
-                print(f"  {dados['t_ms']:>8}  {dados['vazao_Lmin']:>14.4f}  {dados['fase']}")
+                print(f"  {dados['t_ms']:>8}  {dados['vazao_Lmin']:>14.4f}  cooler={cooler_pct:>3}%  {dados['fase']}")
 
                 # Encerra automaticamente após confirmar regime permanente
                 if dados["fase"] == "CONCLUIDO" and vazao_rp is not None:
@@ -117,11 +128,18 @@ def main():
                         linha_raw = ser.readline().decode("utf-8", errors="ignore")
                         dados_extra = parsear_linha(linha_raw)
                         if dados_extra:
-                            writer.writerow(dados_extra)
+                            linha_csv_extra = {
+                                "timestamp":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "temperatura_C": 0.0,
+                                "vazao_L_min":   dados_extra["vazao_Lmin"],
+                                "cooler_%":      100,
+                                "resistencia":   "OFF",
+                            }
+                            writer.writerow(linha_csv_extra)
                             csvfile.flush()
                             amostras += 1
                             confirmacoes += 1
-                            print(f"  {dados_extra['t_ms']:>8}  {dados_extra['vazao_Lmin']:>14.4f}  {dados_extra['fase']}")
+                            print(f"  {dados_extra['t_ms']:>8}  {dados_extra['vazao_Lmin']:>14.4f}  cooler=100%  {dados_extra['fase']}")
                     break
 
     except KeyboardInterrupt:
