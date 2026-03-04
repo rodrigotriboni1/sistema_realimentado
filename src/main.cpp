@@ -68,12 +68,9 @@ void loop()
     double Rt = R1 * Vout / (Vs - Vout);
     temperatura = 1 / (1 / To + log(Rt / Ro) / Beta);
     temperatura = temperatura - 273.15;
-
-    // Cálculo da vazão (Simplificado: 1 pulso = X ml -> Ajustar conforme sensor)
-    // Exemplo genérico: Frequência (Hz) = 7.5 * Q (L/min) -> Q = F / 7.5
-    // Pulsos em 2 segundos -> Freq = pulsos / 2
+    
     float frequencia = pulsos / 2.0; 
-    vazao = frequencia / 7.5; // L/min (Ajuste conforme datasheet do sensor)
+    vazao = frequencia / 7.5;
     
     pulsos = 0;
 
