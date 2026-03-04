@@ -31,10 +31,10 @@ except ImportError:
 BAUD = 115200
 DEFAULT_LOG_DIR = "logs"
 
-# Linhas de dados numéricos: "time_ms,valor"  ex: "2000,1.2345"
-DATA_LINE_RE = re.compile(r"^\d+,\d+\.?\d*\s*$")
-# Cabeçalho enviado pelo firmware: "time_ms,xxx"
-HEADER_LINE_RE = re.compile(r"^time_ms,\w+$")
+# Linhas de dados numéricos: "time_ms,v1,v2,..."  ex: "2000,25.30,1.50,100"
+DATA_LINE_RE = re.compile(r"^\d+(?:,\d+\.?\d*)+\s*$")
+# Cabeçalho enviado pelo firmware: "time_ms,col1,col2,..."
+HEADER_LINE_RE = re.compile(r"^time_ms(?:,\w+)+$")
 
 
 def list_ports():

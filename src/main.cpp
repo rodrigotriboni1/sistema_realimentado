@@ -7,12 +7,24 @@
 #define SENSOR_FLUXO 27
 
 // Variáveis
-const int resolution = 4095;                        // Resolução do conversor AD do ESP
-volatile int pulsos = 0;                            // Pulsos do sensor de fluxo
-unsigned long tempoAnt = 0, tempoAtual = 0, dT = 0; // Variáveis para manipulação do timer
-float temperatura = 0, resistencia = 0, vazao = 0;  // Variáveis para cálculo da temperatura e vazão
-int dutycycleTemp = 0, dutycycleCooler = 0;         // Duty Cycle do PWM do transistor e do cooler
+const int resolution = 4095;                         // Resolução do conversor AD do ESP
+volatile int pulsos = 0;                             // Pulsos do sensor de fluxo
+unsigned long tempoAtual = 0;                        // Tempo atual (millis)
+unsigned long tempoAntFluxo = 0;                     // Timer do sensor de fluxo (200 ms)
+unsigned long tempoAntTemp  = 0;                     // Timer do sensor de temperatura (2000 ms)
+float temperatura = 0, vazao = 0;                    // Leituras dos sensores
+float vazaoAcum  = 0;                                // Acumulador de vazão entre leituras de temperatura
+int   nVazao     = 0;                                // Contagem de amostras de vazão acumuladas
+int dutycycleTemp = 0, dutycycleCooler = 0;          // Duty Cycle do PWM do transistor e do cooler
 bool estadoResistencia = false;
+
+// Detecção de estabilização da temperatura
+#define JANELA_ESTAB  30        // Amostras na janela: 30 × 2s = 60s
+#define LIMIAR_ESTAB  0.5f      // Variação máxima permitida (°C)
+float bufferTemp[JANELA_ESTAB] = {0};
+int   idxBuf      = 0;
+bool  bufferCheio = false;
+bool  coolerLigado = false;
 
 // Constantes do NTC e sistema
 double Vs = 3.3;    // Tensão de referência do ESP32
@@ -27,6 +39,19 @@ void IRAM_ATTR lerFluxo()
   pulsos++;
 }
 
+// Retorna true se a variação de temperatura na janela for <= LIMIAR_ESTAB
+bool estaEstabilizado()
+{
+  if (!bufferCheio) return false;
+  float tMin = bufferTemp[0], tMax = bufferTemp[0];
+  for (int i = 1; i < JANELA_ESTAB; i++)
+  {
+    if (bufferTemp[i] < tMin) tMin = bufferTemp[i];
+    if (bufferTemp[i] > tMax) tMax = bufferTemp[i];
+  }
+  return (tMax - tMin) <= LIMIAR_ESTAB;
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -36,52 +61,85 @@ void setup()
   pinMode(PWM_TEMP, OUTPUT);
   pinMode(PWM_COOLER, OUTPUT);
 
-  dutycycleTemp = 50; // Duty Cycle setado (Exemplo)
-  dutycycleCooler = 50; // Exemplo
+  dutycycleTemp = 0;
+  dutycycleCooler = 0;
 
   ledcAttach(PWM_TEMP, 1000, 8);
   ledcAttach(PWM_COOLER, 1000, 8);
 
-  ledcWrite(PWM_TEMP, (dutycycleTemp * 255) / 100); 
-  ledcWrite(PWM_COOLER, (dutycycleCooler * 255) / 100);
+  ledcWrite(PWM_TEMP, 0);
+  ledcWrite(PWM_COOLER, 0);
 
-  attachInterrupt(digitalPinToInterrupt(SENSOR_FLUXO), lerFluxo, RISING); // Interrupção para sensor de fluxo
+  attachInterrupt(digitalPinToInterrupt(SENSOR_FLUXO), lerFluxo, RISING);
+
+  // Aguarda 2 segundos antes de ligar a resistência
+  delay(2000);
+
+  // Liga resistência no máximo; cooler permanece desligado até estabilizar
+  dutycycleTemp = 100;
+  ledcWrite(PWM_TEMP, (dutycycleTemp * 255) / 100);
+
+  // Cabeçalho CSV para o serial_logger.py
+  Serial.println("time_ms,temp_C,vazao_L_min,cooler_pct,res_pct");
 }
 
 void loop()
 {
   tempoAtual = millis();
-  dT = tempoAtual - tempoAnt;
 
-  // Tempo de Amostragem 2000ms = 2s
-  if (dT >= 2000)
+  // --- Sensor de fluxo: amostrado a cada 200 ms ---
+  if (tempoAtual - tempoAntFluxo >= 200)
   {
-    tempoAnt = tempoAtual;
+    tempoAntFluxo = tempoAtual;
+
+    // Frequência instantânea a partir dos pulsos em 0,2 s
+    float frequencia = pulsos / 0.2f;
+    float vazaoInst  = frequencia / 7.5f; // L/min (ajuste conforme datasheet)
+    pulsos = 0;
+
+    // Acumula para calcular a média no instante da temperatura
+    vazaoAcum += vazaoInst;
+    nVazao++;
+  }
+
+  // --- Sensor de temperatura: amostrado a cada 2000 ms ---
+  if (tempoAtual - tempoAntTemp >= 2000)
+  {
+    tempoAntTemp = tempoAtual;
 
     // Leitura do NTC e cálculo da temperatura
     int leituraADC = analogRead(SENSOR_TEMP);
     double Vout = (leituraADC * Vs) / resolution;
-    
-    // Evita divisão por zero se Vout for muito próximo de Vs
-    if(Vs - Vout < 0.01) Vout = Vs - 0.01;
-    
+
+    if (Vs - Vout < 0.01) Vout = Vs - 0.01;
+
     double Rt = R1 * Vout / (Vs - Vout);
-    temperatura = 1 / (1 / To + log(Rt / Ro) / Beta);
+    temperatura = 1.0 / (1.0 / To + log(Rt / Ro) / Beta);
     temperatura = temperatura - 273.15;
 
-    // Cálculo da vazão (Simplificado: 1 pulso = X ml -> Ajustar conforme sensor)
-    // Exemplo genérico: Frequência (Hz) = 7.5 * Q (L/min) -> Q = F / 7.5
-    // Pulsos em 2 segundos -> Freq = pulsos / 2
-    float frequencia = pulsos / 2.0; 
-    vazao = frequencia / 7.5; // L/min (Ajuste conforme datasheet do sensor)
-    
-    pulsos = 0;
+    // Vazão média das amostras acumuladas desde a última leitura de temperatura
+    vazao = (nVazao > 0) ? (vazaoAcum / nVazao) : 0.0f;
+    vazaoAcum = 0;
+    nVazao    = 0;
 
-    // Estado da Resistência (Baseado no DutyCycle > 0)
     estadoResistencia = (dutycycleTemp > 0);
 
-    // Exibição Serial
-    Serial.printf("Temp: %.2f C | Vazao: %.2f L/min | Cooler: %d%% | Resistencia: %s\n", 
-                  temperatura, vazao, dutycycleCooler, estadoResistencia ? "ON" : "OFF");
+    // Atualiza buffer de estabilização (janela de amostras de temperatura)
+    bufferTemp[idxBuf] = temperatura;
+    idxBuf = (idxBuf + 1) % JANELA_ESTAB;
+    if (idxBuf == 0) bufferCheio = true;
+
+    // Liga cooler no máximo assim que a temperatura estabilizar
+    if (!coolerLigado && estaEstabilizado())
+    {
+      coolerLigado    = true;
+      dutycycleCooler = 100;
+      ledcWrite(PWM_COOLER, (dutycycleCooler * 255) / 100);
+      Serial.println("# ESTABILIZADO - cooler ligado");
+    }
+
+    // Exibição Serial em formato CSV (cadência de 2 s)
+    Serial.printf("%lu,%.2f,%.2f,%d,%d\n",
+                  tempoAtual, temperatura, vazao, dutycycleCooler, dutycycleTemp);
   }
 }
