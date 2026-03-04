@@ -10,7 +10,7 @@ from typing import Optional
 import time
 
 # Configurações
-PORTA_SERIAL = "COM7"
+PORTA_SERIAL = "COM6"
 BAUD_RATE = 115200
 ARQUIVO_CSV = "dados_ensaio_ft.csv"
 

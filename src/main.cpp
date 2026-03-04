@@ -9,7 +9,8 @@
 // Variáveis
 const int resolution = 4095;
 volatile int pulsos = 0;
-unsigned long tempoAnt = 0, tempoAtual = 0, dT = 0;
+unsigned long tempoAntFluxo = 0, tempoAntTemp = 0, tempoAtual = 0;
+int dutycycleCooler = 0, dutycycleTemp = 0;
 float temperatura = 0, vazao = 0;
 bool estadoResistencia = false;
 
@@ -24,10 +25,10 @@ double Ro = 10000;
 float spTemperatura = 40.0;  // Setpoint de temperatura (°C)
 float spVazao = 1.0;         // Setpoint de vazão (L/min)
 
-// --- PID Vazão (PIDF): Ts = 2s ---
-// H(z) = (0.076z² - 0.08423z + 0.02334) / (z² - 1.6z + 0.6)
-const float bF0 =  0.076,   bF1 = -0.08423, bF2 =  0.02334;
-const float aF1 = -1.6,     aF2 =  0.6;
+// --- PID Vazão (PIDF): Ts = 0.2s ---
+// H(z) = (0.003z² - 0.00439z + 0.001445) / (z² - z) x1000
+const float bF0 =  3.0,     bF1 = -4.39,    bF2 =  1.445;
+const float aF1 = -1.0,     aF2 =  0.0;
 float eF[3] = {0, 0, 0};   // e[k], e[k-1], e[k-2]
 float uF[3] = {0, 0, 0};   // u[k], u[k-1], u[k-2]
 
@@ -72,29 +73,17 @@ void setup()
 void loop()
 {
   tempoAtual = millis();
-  dT = tempoAtual - tempoAnt;
 
-  // Tempo de Amostragem 2000ms = 2s
-  if (dT >= 2000)
+  // ---- PID Vazão: Ts = 200ms ----
+  if (tempoAtual - tempoAntFluxo >= 200)
   {
-    tempoAnt = tempoAtual;
+    float dtFluxo = (tempoAtual - tempoAntFluxo) / 1000.0;
+    tempoAntFluxo = tempoAtual;
 
-    // Leitura do NTC e cálculo da temperatura
-    int leituraADC = analogRead(SENSOR_TEMP);
-    double Vout = (leituraADC * Vs) / resolution;
-    
-    // Evita divisão por zero se Vout for muito próximo de Vs
-    if(Vs - Vout < 0.01) Vout = Vs - 0.01;
-    
-    double Rt = R1 * Vout / (Vs - Vout);
-    temperatura = 1 / (1 / To + log(Rt / Ro) / Beta);
-    temperatura = temperatura - 273.15;
-    
-    float frequencia = pulsos / 2.0;
+    float frequencia = pulsos / dtFluxo;
     vazao = frequencia / 7.5;
     pulsos = 0;
 
-    // ---- PID Vazão ----
     eF[0] = spVazao - vazao;
     uF[0] = bF0*eF[0] + bF1*eF[1] + bF2*eF[2] - aF1*uF[1] - aF2*uF[2];
     uF[0] = saturar(uF[0], 0, 100);
@@ -102,10 +91,24 @@ void loop()
     eF[2] = eF[1];  eF[1] = eF[0];
     uF[2] = uF[1];  uF[1] = uF[0];
 
-    int dutycycleCooler = (int)uF[0];
+    dutycycleCooler = (int)uF[0];
     ledcWrite(PWM_COOLER, (dutycycleCooler * 255) / 100);
+  }
 
-    // ---- PID Temperatura ----
+  // ---- PID Temperatura: Ts = 2000ms ----
+  if (tempoAtual - tempoAntTemp >= 2000)
+  {
+    tempoAntTemp = tempoAtual;
+
+    int leituraADC = analogRead(SENSOR_TEMP);
+    double Vout = (leituraADC * Vs) / resolution;
+
+    if(Vs - Vout < 0.01) Vout = Vs - 0.01;
+
+    double Rt = R1 * Vout / (Vs - Vout);
+    temperatura = 1 / (1 / To + log(Rt / Ro) / Beta);
+    temperatura = temperatura - 273.15;
+
     eT[0] = spTemperatura - temperatura;
     uT[0] = bT0*eT[0] + bT1*eT[1] + bT2*eT[2] - aT1*uT[1] - aT2*uT[2];
     uT[0] = saturar(uT[0], 0, 100);
@@ -113,7 +116,7 @@ void loop()
     eT[2] = eT[1];  eT[1] = eT[0];
     uT[2] = uT[1];  uT[1] = uT[0];
 
-    int dutycycleTemp = (int)uT[0];
+    dutycycleTemp = (int)uT[0];
     ledcWrite(PWM_TEMP, (dutycycleTemp * 255) / 100);
 
     estadoResistencia = (dutycycleTemp > 0);
