@@ -1,84 +1,138 @@
 """
-Captura dados de temperatura via Serial (ESP32) a cada 2 segundos e grava em CSV.
+Captura dados do ensaio de identificação G_F(s) via Serial (ESP32).
+
+Formato esperado do ESP32:
+  Linhas de comentário  →  começam com '#' (ignoradas no CSV)
+  Cabeçalho             →  t_ms,vazao_Lmin,fase
+  Dados                 →  <inteiro>,<float>,<INICIAL|DEGRAU|CONCLUIDO>
+
+Saída: arquivo CSV pronto para plotagem e identificação de G_F(s).
 """
 
 import serial
 import csv
-import re
+import sys
 from datetime import datetime
-from typing import Optional
-import time
+from pathlib import Path
 
-# Configurações
+# ── Configurações ──────────────────────────────────────────────────────────────
 PORTA_SERIAL = "COM6"
-BAUD_RATE = 115200
-ARQUIVO_CSV = "dados_temperatura.csv"
+BAUD_RATE    = 115200
+ARQUIVO_CSV  = f"ensaio_GF_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+COLUNAS_ESP  = ["t_ms", "vazao_Lmin", "fase"]   # cabeçalho enviado pelo ESP32
+COLUNAS_CSV  = ["t_ms", "vazao_Lmin", "fase"]    # colunas gravadas no arquivo
+# ──────────────────────────────────────────────────────────────────────────────
 
 
-def extrair_dados(linha: str) -> Optional[dict]:
+def conectar(porta: str, baud: int) -> serial.Serial:
+    print(f"Conectando em {porta} @ {baud} baud...")
+    try:
+        ser = serial.Serial(porta, baud, timeout=2)
+        print("Conectado! Aguardando dados do ESP32...\n")
+        return ser
+    except serial.SerialException as e:
+        print(f"[ERRO] Não foi possível abrir {porta}: {e}")
+        print("Verifique a porta e se o ESP32 está conectado.")
+        sys.exit(1)
+
+
+def parsear_linha(linha: str) -> dict | None:
     """
-    Extrai temperatura, vazão, cooler e resistência da linha serial.
-    Formato esperado: Temp: 25.50 C | Vazao: 1.20 L/min | Cooler: 50% | Resistencia: ON
+    Interpreta uma linha de dados CSV enviada pelo ESP32.
+    Retorna dict com as colunas ou None se a linha for inválida/comentário.
     """
-    padrao = r"Temp:\s*([-\d.]+)\s*C\s*\|\s*Vazao:\s*([-\d.]+)\s*L/min\s*\|\s*Cooler:\s*(\d+)%\s*\|\s*Resistencia:\s*(ON|OFF)"
-    match = re.search(padrao, linha)
-    if match:
+    linha = linha.strip()
+
+    # Ignora comentários e linhas vazias
+    if not linha or linha.startswith("#"):
+        return None
+
+    # Ignora o cabeçalho enviado pelo ESP32 (re-enviado a cada reset)
+    if linha.startswith("t_ms"):
+        return None
+
+    partes = linha.split(",")
+    if len(partes) != 3:
+        return None
+
+    try:
         return {
-            "temperatura": float(match.group(1)),
-            "vazao": float(match.group(2)),
-            "cooler": int(match.group(3)),
-            "resistencia": match.group(4),
+            "t_ms":      int(partes[0]),
+            "vazao_Lmin": float(partes[1]),
+            "fase":      partes[2].upper(),
         }
-    return None
+    except ValueError:
+        return None
 
 
 def main():
-    print(f"Conectando à porta {PORTA_SERIAL} ({BAUD_RATE} baud)...")
+    ser = conectar(PORTA_SERIAL, BAUD_RATE)
+
+    caminho = Path(ARQUIVO_CSV)
+    print(f"Gravando em: {caminho.resolve()}")
+    print("-" * 60)
+    print(f"{'t_ms':>8}  {'vazao (L/min)':>14}  fase")
+    print("-" * 60)
+
+    amostras = 0
+    vazao_rp = None
 
     try:
-        ser = serial.Serial(PORTA_SERIAL, BAUD_RATE, timeout=1)
-        print("Conectado! Aguardando dados (a cada ~2s)...")
-    except serial.SerialException as e:
-        print(f"Erro ao abrir porta serial: {e}")
-        print("Verifique a porta e se o ESP32 está conectado.")
-        return
-
-    # Cria arquivo CSV com cabeçalho
-    arquivo_existe = False
-    try:
-        with open(ARQUIVO_CSV, "r") as f:
-            arquivo_existe = True
-    except FileNotFoundError:
-        pass
-
-    try:
-        with open(ARQUIVO_CSV, "a", newline="", encoding="utf-8") as csvfile:
-            writer = csv.writer(csvfile)
-            if not arquivo_existe:
-                writer.writerow(["timestamp", "temperatura_C", "vazao_L_min", "cooler_%", "resistencia"])
+        with open(ARQUIVO_CSV, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=COLUNAS_CSV)
+            writer.writeheader()
 
             while True:
-                if ser.in_waiting:
-                    linha = ser.readline().decode("utf-8", errors="ignore").strip()
-                    dados = extrair_dados(linha)
-                    if dados:
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        writer.writerow([
-                            timestamp,
-                            dados["temperatura"],
-                            dados["vazao"],
-                            dados["cooler"],
-                            dados["resistencia"],
-                        ])
-                        csvfile.flush()
-                        print(f"[{timestamp}] Temp: {dados['temperatura']:.2f}°C | Salvo em {ARQUIVO_CSV}")
+                linha_raw = ser.readline().decode("utf-8", errors="ignore")
 
-                time.sleep(0.1)
+                # Repassa comentários do ESP32 direto para o terminal
+                linha_strip = linha_raw.strip()
+                if linha_strip.startswith("#"):
+                    print(f"  {linha_strip}")
+
+                    # Captura a vazão de regime permanente anunciada pelo firmware
+                    if "Vazao_RP" in linha_strip:
+                        try:
+                            vazao_rp = float(linha_strip.split("=")[1].split()[0])
+                        except (IndexError, ValueError):
+                            pass
+                    continue
+
+                dados = parsear_linha(linha_raw)
+                if dados is None:
+                    continue
+
+                writer.writerow(dados)
+                csvfile.flush()
+                amostras += 1
+
+                print(f"  {dados['t_ms']:>8}  {dados['vazao_Lmin']:>14.4f}  {dados['fase']}")
+
+                # Encerra automaticamente após confirmar regime permanente
+                if dados["fase"] == "CONCLUIDO" and vazao_rp is not None:
+                    # Aguarda mais algumas amostras de confirmação (≈ 2 s)
+                    confirmacoes = 0
+                    while confirmacoes < 10:
+                        linha_raw = ser.readline().decode("utf-8", errors="ignore")
+                        dados_extra = parsear_linha(linha_raw)
+                        if dados_extra:
+                            writer.writerow(dados_extra)
+                            csvfile.flush()
+                            amostras += 1
+                            confirmacoes += 1
+                            print(f"  {dados_extra['t_ms']:>8}  {dados_extra['vazao_Lmin']:>14.4f}  {dados_extra['fase']}")
+                    break
 
     except KeyboardInterrupt:
-        print("\nEncerrado pelo usuário.")
+        print("\n\nInterrompido pelo usuário.")
     finally:
         ser.close()
+        print("-" * 60)
+        print(f"Total de amostras gravadas : {amostras}")
+        if vazao_rp is not None:
+            print(f"Vazão em regime permanente : {vazao_rp:.4f} L/min  (setpoint máximo)")
+        print(f"Arquivo salvo em           : {Path(ARQUIVO_CSV).resolve()}")
         print("Porta serial fechada.")
 
 
