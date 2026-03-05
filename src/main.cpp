@@ -22,8 +22,13 @@ double To = 298.15;
 double Ro = 10000;
 
 // Setpoints
-float spTemperatura = 40.0;  // Setpoint de temperatura (°C)
 float spVazao = 1.0;         // Setpoint de vazão (L/min)
+
+// Perfil de setpoints de temperatura: 40 -> 50 -> 35
+const float perfil[] = {40.0, 50.0, 35.0};
+const int numEtapas = 3;
+int etapaAtual = 0;
+float spTemperatura = perfil[0];
 
 // --- PID Vazão (PIDF): Ts = 0.2s ---
 // H(z) = (0.05z² - 0.03277z + 0.002777) / (z² - 0.7z - 0.3)
@@ -109,6 +114,21 @@ void loop()
     temperatura = 1 / (1 / To + log(Rt / Ro) / Beta);
     temperatura = temperatura - 273.15;
 
+    // Avança para a próxima etapa quando a temperatura chega perto do setpoint atual
+    if (etapaAtual < numEtapas - 1)
+    {
+      float alvo = perfil[etapaAtual];
+      float proximo = perfil[etapaAtual + 1];
+      bool subindo = (proximo > alvo);
+      bool atingiu = subindo ? (temperatura >= alvo - 0.5f)
+                             : (temperatura <= alvo + 0.5f);
+      if (atingiu)
+      {
+        etapaAtual++;
+        spTemperatura = perfil[etapaAtual];
+      }
+    }
+
     eT[0] = spTemperatura - temperatura;
     uT[0] = bT0*eT[0] + bT1*eT[1] + bT2*eT[2] - aT1*uT[1] - aT2*uT[2];
     uT[0] = saturar(uT[0], 0, 100);
@@ -121,7 +141,7 @@ void loop()
 
     estadoResistencia = (dutycycleTemp > 0);
 
-    Serial.printf("Temp: %.2f C | Vazao: %.2f L/min | DC_Cooler: %d%% | DC_Resist: %d%% | Resistencia: %s\n",
-                  temperatura, vazao, dutycycleCooler, dutycycleTemp, estadoResistencia ? "ON" : "OFF");
+    Serial.printf("Temp: %.2f C | SP: %.1f C | Etapa: %d | Vazao: %.2f L/min | DC_Cooler: %d%% | DC_Resist: %d%% | Resistencia: %s\n",
+                  temperatura, spTemperatura, etapaAtual + 1, vazao, dutycycleCooler, dutycycleTemp, estadoResistencia ? "ON" : "OFF");
   }
 }
