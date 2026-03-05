@@ -26,9 +26,9 @@ float spTemperatura = 40.0;  // Setpoint de temperatura (°C)
 float spVazao = 1.0;         // Setpoint de vazão (L/min)
 
 // --- PID Vazão (PIDF): Ts = 0.2s ---
-// H(z) = (0.003z² - 0.00439z + 0.001445) / (z² - z) x1000
-const float bF0 =  3.0,     bF1 = -4.39,    bF2 =  1.445;
-const float aF1 = -1.0,     aF2 =  0.0;
+// H(z) = (0.05z² - 0.03277z + 0.002777) / (z² - 0.7z - 0.3)
+const float bF0 =  0.05,    bF1 = -0.03277, bF2 =  0.002777;
+const float aF1 = -0.7,     aF2 = -0.3;
 float eF[3] = {0, 0, 0};   // e[k], e[k-1], e[k-2]
 float uF[3] = {0, 0, 0};   // u[k], u[k-1], u[k-2]
 
