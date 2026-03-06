@@ -118,8 +118,8 @@ void loop()
     if (etapaAtual < numEtapas - 1)
     {
       float alvo = perfil[etapaAtual];
-      float proximo = perfil[etapaAtual + 1];
-      bool subindo = (proximo > alvo);
+      float anterior = (etapaAtual > 0) ? perfil[etapaAtual - 1] : 0.0f;
+      bool subindo = (alvo > anterior);
       bool atingiu = subindo ? (temperatura >= alvo - 0.5f)
                              : (temperatura <= alvo + 0.5f);
       if (atingiu)
