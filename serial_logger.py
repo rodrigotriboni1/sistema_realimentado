@@ -1,5 +1,5 @@
 """
-Captura dados de temperatura via Serial (ESP32) a cada 2 segundos e grava em CSV.
+Captura dados do sistema realimentado via Serial (ESP32) a cada 2 segundos e grava em CSV.
 """
 
 import serial
@@ -10,24 +10,35 @@ from typing import Optional
 import time
 
 # Configurações
-PORTA_SERIAL = "COM6"
+PORTA_SERIAL = "COM7"
 BAUD_RATE = 115200
 ARQUIVO_CSV = "dados_ensaio_ft.csv"
 
 
 def extrair_dados(linha: str) -> Optional[dict]:
     """
-    Extrai temperatura, vazão, cooler e resistência da linha serial.
-    Formato esperado: Temp: 25.50 C | Vazao: 1.20 L/min | Cooler: 50% | Resistencia: ON
+    Extrai dados da linha serial.
+    Formato: Temp: 25.50 C | SP: 40.0 C | Etapa: 1 | Vazao: 1.20 L/min | DC_Cooler: 50% | DC_Resist: 30% | Resistencia: ON
     """
-    padrao = r"Temp:\s*([-\d.]+)\s*C\s*\|\s*Vazao:\s*([-\d.]+)\s*L/min\s*\|\s*Cooler:\s*(\d+)%\s*\|\s*Resistencia:\s*(ON|OFF)"
+    padrao = (
+        r"Temp:\s*([-\d.]+)\s*C\s*\|\s*"
+        r"SP:\s*([-\d.]+)\s*C\s*\|\s*"
+        r"Etapa:\s*(\d+)\s*\|\s*"
+        r"Vazao:\s*([-\d.]+)\s*L/min\s*\|\s*"
+        r"DC_Cooler:\s*(\d+)%\s*\|\s*"
+        r"DC_Resist:\s*(\d+)%\s*\|\s*"
+        r"Resistencia:\s*(ON|OFF)"
+    )
     match = re.search(padrao, linha)
     if match:
         return {
             "temperatura": float(match.group(1)),
-            "vazao": float(match.group(2)),
-            "cooler": int(match.group(3)),
-            "resistencia": match.group(4),
+            "sp_temperatura": float(match.group(2)),
+            "etapa": int(match.group(3)),
+            "vazao": float(match.group(4)),
+            "dc_cooler": int(match.group(5)),
+            "dc_resistencia": int(match.group(6)),
+            "resistencia": match.group(7),
         }
     return None
 
@@ -55,7 +66,7 @@ def main():
         with open(ARQUIVO_CSV, "a", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
             if not arquivo_existe:
-                writer.writerow(["timestamp", "temperatura_C", "vazao_L_min", "cooler_%", "resistencia"])
+                writer.writerow(["timestamp", "temperatura_C", "sp_temperatura_C", "etapa", "vazao_L_min", "dc_cooler_%", "dc_resistencia_%", "resistencia"])
 
             while True:
                 if ser.in_waiting:
@@ -66,12 +77,22 @@ def main():
                         writer.writerow([
                             timestamp,
                             dados["temperatura"],
+                            dados["sp_temperatura"],
+                            dados["etapa"],
                             dados["vazao"],
-                            dados["cooler"],
+                            dados["dc_cooler"],
+                            dados["dc_resistencia"],
                             dados["resistencia"],
                         ])
                         csvfile.flush()
-                        print(f"[{timestamp}] Temp: {dados['temperatura']:.2f}°C | Vazao: {dados['vazao']:.2f} L/min | Salvo em {ARQUIVO_CSV}")
+                        print(
+                            f"[{timestamp}] Temp: {dados['temperatura']:.2f}°C | "
+                            f"SP: {dados['sp_temperatura']:.1f}°C | "
+                            f"Etapa: {dados['etapa']} | "
+                            f"Vazao: {dados['vazao']:.2f} L/min | "
+                            f"Cooler: {dados['dc_cooler']}% | "
+                            f"Resist: {dados['dc_resistencia']}%"
+                        )
 
                 time.sleep(0.1)
 

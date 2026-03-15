@@ -16,15 +16,40 @@ const char* serverUrl = "http://192.168.1.10:8000";  // IP do PC onde roda o bac
 // Variáveis
 const int resolution = 4095;
 volatile int pulsos = 0;
-unsigned long tempoAnt = 0, tempoAtual = 0, dT = 0;
-float temperatura = 0, resistencia = 0, vazao = 0;
-int dutycycleTemp = 0, dutycycleCooler = 0;
+unsigned long tempoAntFluxo = 0, tempoAntTemp = 0, tempoAtual = 0;
+int dutycycleCooler = 0, dutycycleTemp = 0;
+float temperatura = 0, vazao = 0;
 bool estadoResistencia = false;
 
-// Polling da API a cada 3 s.
-// Sem WiFi ou se GET falhar: mantemos os últimos PWMs aplicados (ou 0% até primeira resposta válida).
-unsigned long lastControlPoll = 0;
-const unsigned long CONTROL_POLL_MS = 3000;
+// Constantes do NTC
+double Vs = 3.3;
+double R1 = 10000;
+double Beta = 3950;
+double To = 298.15;
+double Ro = 10000;
+
+// Setpoints
+float spVazao = 1.0;         // Setpoint de vazão (L/min)
+
+// Perfil de setpoints de temperatura: 40 -> 50 -> 35
+const float perfil[] = {40.0, 50.0, 35.0};
+const int numEtapas = 3;
+int etapaAtual = 0;
+float spTemperatura = perfil[0];
+
+// --- PID Vazão (PIDF): Ts = 0.2s ---
+// H(z) = (0.05z² - 0.03277z + 0.002777) / (z² - 0.7z - 0.3)
+const float bF0 =  0.05,    bF1 = -0.03277, bF2 =  0.002777;
+const float aF1 = -0.7,     aF2 = -0.3;
+float eF[3] = {0, 0, 0};   // e[k], e[k-1], e[k-2]
+float uF[3] = {0, 0, 0};   // u[k], u[k-1], u[k-2]
+
+// --- PID Temperatura (PIDt): Ts = 2s ---
+// H(z) = (8.5z² - 10.99z + 2.531) / (z² - 0.5z - 0.5)
+const float bT0 =  8.5,     bT1 = -10.99,   bT2 =  2.531;
+const float aT1 = -0.5,     aT2 = -0.5;
+float eT[3] = {0, 0, 0};
+float uT[3] = {0, 0, 0};
 
 // Timeout de conexão WiFi (ms); após isso segue sem travar (Serial e PWMs em 0 até API responder).
 const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
@@ -40,54 +65,15 @@ void IRAM_ATTR lerFluxo() {
   pulsos++;
 }
 
-// Parse simples de JSON: "resistencia":N ou "cooler":N
-int parseJsonInt(const char* json, const char* key) {
-  String s = String(json);
-  String k = String(key);
-  int idx = s.indexOf(k);
-  if (idx < 0) return -1;
-  idx = s.indexOf(':', idx);
-  if (idx < 0) return -1;
-  idx++;
-  while (idx < (int)s.length() && (s[idx] == ' ' || s[idx] == '\t')) idx++;
-  int val = 0;
-  bool neg = false;
-  if (idx < (int)s.length() && s[idx] == '-') { neg = true; idx++; }
-  while (idx < (int)s.length() && s[idx] >= '0' && s[idx] <= '9') {
-    val = val * 10 + (s[idx] - '0');
-    idx++;
-  }
-  return neg ? -val : val;
+float saturar(float valor, float minimo, float maximo)
+{
+  if (valor > maximo) return maximo;
+  if (valor < minimo) return minimo;
+  return valor;
 }
 
-void pollControl() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  HTTPClient http;
-  String url = String(serverUrl) + "/api/control";
-  http.begin(url);
-  int code = http.GET();
-
-  if (code == HTTP_CODE_OK) {
-    String payload = http.getString();
-    int r = parseJsonInt(payload.c_str(), "resistencia");
-    int c = parseJsonInt(payload.c_str(), "cooler");
-    http.end();
-
-    if (r >= 0 && r <= 100 && c >= 0 && c <= 100) {
-      dutycycleTemp = r;
-      dutycycleCooler = c;
-      ledcWrite(PWM_TEMP, (dutycycleTemp * 255) / 100);
-      ledcWrite(PWM_COOLER, (dutycycleCooler * 255) / 100);
-    }
-    // Se parse falhar, mantemos os últimos valores aplicados
-  } else {
-    http.end();
-    // Falha na API: mantemos últimos PWMs (comportamento definido no plano)
-  }
-}
-
-void setup() {
+void setup()
+{
   Serial.begin(115200);
 
   pinMode(SENSOR_TEMP, INPUT);
@@ -100,53 +86,78 @@ void setup() {
   ledcWrite(PWM_TEMP, 0);
   ledcWrite(PWM_COOLER, 0);
 
-  attachInterrupt(digitalPinToInterrupt(SENSOR_FLUXO), lerFluxo, RISING);
+  ledcWrite(PWM_TEMP, 0);
+  ledcWrite(PWM_COOLER, 0);
 
-  WiFi.begin(ssid, password);
-  Serial.print("Conectando ao WiFi");
-  unsigned long wifiStart = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - wifiStart) < WIFI_CONNECT_TIMEOUT_MS) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println();
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("WiFi timeout. Operando offline; PWMs em 0 até conectar e receber /api/control.");
-  }
-  Serial.println("Controle via API: GET /api/control a cada 3s");
+  attachInterrupt(digitalPinToInterrupt(SENSOR_FLUXO), lerFluxo, RISING);
 }
 
 void loop() {
   tempoAtual = millis();
-  dT = tempoAtual - tempoAnt;
 
-  // Polling da API de controle a cada 3 s
-  if (tempoAtual - lastControlPoll >= CONTROL_POLL_MS) {
-    lastControlPoll = tempoAtual;
-    pollControl();
+  // ---- PID Vazão: Ts = 200ms ----
+  if (tempoAtual - tempoAntFluxo >= 200)
+  {
+    float dtFluxo = (tempoAtual - tempoAntFluxo) / 1000.0;
+    tempoAntFluxo = tempoAtual;
+
+    float frequencia = pulsos / dtFluxo;
+    vazao = frequencia / 7.5;
+    pulsos = 0;
+
+    eF[0] = spVazao - vazao;
+    uF[0] = bF0*eF[0] + bF1*eF[1] + bF2*eF[2] - aF1*uF[1] - aF2*uF[2];
+    uF[0] = saturar(uF[0], 0, 100);
+
+    eF[2] = eF[1];  eF[1] = eF[0];
+    uF[2] = uF[1];  uF[1] = uF[0];
+
+    dutycycleCooler = (int)uF[0];
+    ledcWrite(PWM_COOLER, (dutycycleCooler * 255) / 100);
   }
 
-  // Amostragem 2 s: sensores e Serial
-  if (dT >= 2000) {
-    tempoAnt = tempoAtual;
+  // ---- PID Temperatura: Ts = 2000ms ----
+  if (tempoAtual - tempoAntTemp >= 2000)
+  {
+    tempoAntTemp = tempoAtual;
 
     int leituraADC = analogRead(SENSOR_TEMP);
     double Vout = (leituraADC * Vs) / resolution;
-    if (Vs - Vout < 0.01) Vout = Vs - 0.01;
+
+    if(Vs - Vout < 0.01) Vout = Vs - 0.01;
+
     double Rt = R1 * Vout / (Vs - Vout);
     temperatura = 1 / (1 / To + log(Rt / Ro) / Beta);
     temperatura = temperatura - 273.15;
 
-    float frequencia = pulsos / 2.0f;
-    vazao = frequencia / 7.5f;
-    pulsos = 0;
+    // Avança para a próxima etapa quando a temperatura chega perto do setpoint atual
+    if (etapaAtual < numEtapas - 1)
+    {
+      float alvo = perfil[etapaAtual];
+      float anterior = (etapaAtual > 0) ? perfil[etapaAtual - 1] : 0.0f;
+      bool subindo = (alvo > anterior);
+      bool atingiu = subindo ? (temperatura >= alvo - 0.5f)
+                             : (temperatura <= alvo + 0.5f);
+      if (atingiu)
+      {
+        etapaAtual++;
+        spTemperatura = perfil[etapaAtual];
+      }
+    }
+
+    eT[0] = spTemperatura - temperatura;
+    uT[0] = bT0*eT[0] + bT1*eT[1] + bT2*eT[2] - aT1*uT[1] - aT2*uT[2];
+    uT[0] = saturar(uT[0], 0, 100);
+
+    eT[2] = eT[1];  eT[1] = eT[0];
+    uT[2] = uT[1];  uT[1] = uT[0];
+
+    dutycycleTemp = (int)uT[0];
+    ledcWrite(PWM_TEMP, (dutycycleTemp * 255) / 100);
 
     estadoResistencia = (dutycycleTemp > 0);
 
-    Serial.printf("Temp: %.2f C | Vazao: %.2f L/min | Cooler: %d%% | Resistencia: %s\n",
-                  temperatura, vazao, dutycycleCooler, estadoResistencia ? "ON" : "OFF");
+    Serial.printf("Temp: %.2f C | SP: %.1f C | Etapa: %d | Vazao: %.2f L/min | DC_Cooler: %d%% | DC_Resist: %d%% | Resistencia: %s\n",
+                  temperatura, spTemperatura, etapaAtual + 1, vazao, dutycycleCooler, dutycycleTemp, estadoResistencia ? "ON" : "OFF");
   }
 }
