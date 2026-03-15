@@ -1,6 +1,18 @@
 """
-Captura dados do sistema realimentado via Serial (ESP32) a cada 2 segundos e grava em CSV.
-Firmware: aquecimento ate 40 C -> estabilizacao -> cooler ligado (SP 5 L/min) -> nova estabilizacao.
+Captura dados do ESP32 via Serial e grava em CSV.
+
+Suporta tres formatos de firmware:
+
+  [1] Ensaio open-loop temperatura (PWM_Temp=100%, Cooler=0%):
+        Temp: 35.50 C | DC_Temp: 100% | DC_Cooler: 0%
+
+  [2] Ensaio com PID (variacao de SP):
+        Temp: 38.50 C | SP_Temp: 40.0 C | Fase: AQUECENDO | Estab: 2/5 |
+        Vazao: 0.00 L/min | SP_Vazao: 0.0 |
+        DC_Cooler: 0% | DC_Resist: 75% | Resistencia: ON
+
+  [3] Ensaio open-loop fluxo (PWM_Temp=0%, Cooler=100%):
+        Vazao: 3.20 L/min | Pulsos: 24 | DC_Temp: 0% | DC_Cooler: 100%
 """
 
 import serial
@@ -10,28 +22,58 @@ from datetime import datetime
 from typing import Optional
 import time
 
-# Configurações
-PORTA_SERIAL = "COM7"
+# ── Configuracoes ──────────────────────────────────────────────────────────────
+PORTA_SERIAL = "COM6"
 BAUD_RATE    = 115200
-ARQUIVO_CSV  = "dados_ensaio_variacao_sp.csv"
+
+# Modo 1: open-loop temperatura  |  Modo 2: PID  |  Modo 3: open-loop fluxo
+MODO = 3
+ARQUIVO_CSV = {
+    1: "dados_ensaio_openloop_temp.csv",
+    2: "dados_ensaio_variacao_sp.csv",
+    3: "dados_ensaio_openloop_fluxo.csv",
+}.get(MODO, "dados_ensaio.csv")
 
 
-LABEL_FASE = {
-    "AQUECENDO":    "Aquecendo ate 40 C",
-    "COOLER_ON":    "Cooler ligado (SP 5 L/min)",
-    "ESTABILIZADO": "Sistema estabilizado",
-}
+# ── Parsers ────────────────────────────────────────────────────────────────────
+def extrair_openloop(linha: str) -> Optional[dict]:
+    """Formato: Temp: 35.50 C | DC_Temp: 100% | DC_Cooler: 0%"""
+    padrao = (
+        r"Temp:\s*([-\d.]+)\s*C\s*\|\s*"
+        r"DC_Temp:\s*(\d+)%\s*\|\s*"
+        r"DC_Cooler:\s*(\d+)%"
+    )
+    m = re.search(padrao, linha)
+    if m:
+        return {
+            "temperatura": float(m.group(1)),
+            "dc_temp":     int(m.group(2)),
+            "dc_cooler":   int(m.group(3)),
+        }
+    return None
 
 
-def extrair_dados(linha: str) -> Optional[dict]:
-    """
-    Extrai dados da linha serial enviada pelo firmware.
+def extrair_fluxo(linha: str) -> Optional[dict]:
+    """Formato: Vazao: 3.20 L/min | Pulsos: 24 | DC_Temp: 0% | DC_Cooler: 100%"""
+    padrao = (
+        r"Vazao:\s*([-\d.]+)\s*L/min\s*\|\s*"
+        r"Pulsos:\s*(\d+)\s*\|\s*"
+        r"DC_Temp:\s*(\d+)%\s*\|\s*"
+        r"DC_Cooler:\s*(\d+)%"
+    )
+    m = re.search(padrao, linha)
+    if m:
+        return {
+            "vazao":     float(m.group(1)),
+            "pulsos":    int(m.group(2)),
+            "dc_temp":   int(m.group(3)),
+            "dc_cooler": int(m.group(4)),
+        }
+    return None
 
-    Formato esperado:
-      Temp: 38.50 C | SP_Temp: 40.0 C | Fase: AQUECENDO | Estab: 2/5 |
-      Vazao: 0.00 L/min | SP_Vazao: 0.0 |
-      DC_Cooler: 0% | DC_Resist: 75% | Resistencia: ON
-    """
+
+def extrair_pid(linha: str) -> Optional[dict]:
+    """Formato completo com SP, fase, estab, vazao."""
     padrao = (
         r"Temp:\s*([-\d.]+)\s*C\s*\|\s*"
         r"SP_Temp:\s*([-\d.]+)\s*C\s*\|\s*"
@@ -43,24 +85,40 @@ def extrair_dados(linha: str) -> Optional[dict]:
         r"DC_Resist:\s*(\d+)%\s*\|\s*"
         r"Resistencia:\s*(ON|OFF)"
     )
-    match = re.search(padrao, linha)
-    if match:
+    m = re.search(padrao, linha)
+    if m:
         return {
-            "temperatura":    float(match.group(1)),
-            "sp_temperatura": float(match.group(2)),
-            "fase":           match.group(3),
-            "estab_contagem": int(match.group(4)),
-            "estab_alvo":     int(match.group(5)),
-            "vazao":          float(match.group(6)),
-            "sp_vazao":       float(match.group(7)),
-            "dc_cooler":      int(match.group(8)),
-            "dc_resistencia": int(match.group(9)),
-            "resistencia":    match.group(10),
+            "temperatura":    float(m.group(1)),
+            "sp_temperatura": float(m.group(2)),
+            "fase":           m.group(3),
+            "estab_contagem": int(m.group(4)),
+            "estab_alvo":     int(m.group(5)),
+            "vazao":          float(m.group(6)),
+            "sp_vazao":       float(m.group(7)),
+            "dc_cooler":      int(m.group(8)),
+            "dc_resistencia": int(m.group(9)),
+            "resistencia":    m.group(10),
         }
     return None
 
 
-CABECALHO = [
+# ── Cabecalhos CSV ─────────────────────────────────────────────────────────────
+CABECALHO_OPENLOOP = [
+    "timestamp",
+    "temperatura_C",
+    "dc_temp_%",
+    "dc_cooler_%",
+]
+
+CABECALHO_FLUXO = [
+    "timestamp",
+    "vazao_L_min",
+    "pulsos",
+    "dc_temp_%",
+    "dc_cooler_%",
+]
+
+CABECALHO_PID = [
     "timestamp",
     "temperatura_C",
     "sp_temperatura_C",
@@ -75,18 +133,22 @@ CABECALHO = [
 ]
 
 
+# ── Main ───────────────────────────────────────────────────────────────────────
 def main():
-    print(f"Conectando à porta {PORTA_SERIAL} ({BAUD_RATE} baud)...")
-    print(f"Arquivo de saída: {ARQUIVO_CSV}")
-    print("Ensaio: aquecimento 40 C -> estabilizacao -> cooler 5 L/min -> nova estabilizacao\n")
+    modo_str = {1: "open-loop temperatura", 2: "PID variacao de SP", 3: "open-loop fluxo"}.get(MODO, "?")
+    print(f"Modo: {modo_str}")
+    print(f"Porta: {PORTA_SERIAL} | Baud: {BAUD_RATE}")
+    print(f"Arquivo de saida: {ARQUIVO_CSV}\n")
 
     try:
         ser = serial.Serial(PORTA_SERIAL, BAUD_RATE, timeout=1)
-        print("Conectado! Aguardando dados (a cada ~2 s)...\n")
+        print("Conectado! Aguardando dados...\n")
     except serial.SerialException as e:
         print(f"Erro ao abrir porta serial: {e}")
-        print("Verifique a porta e se o ESP32 está conectado.")
         return
+
+    cabecalho = {1: CABECALHO_OPENLOOP, 2: CABECALHO_PID, 3: CABECALHO_FLUXO}[MODO]
+    extrair   = {1: extrair_openloop,   2: extrair_pid,   3: extrair_fluxo  }[MODO]
 
     arquivo_existe = False
     try:
@@ -95,28 +157,69 @@ def main():
     except FileNotFoundError:
         pass
 
+    amostras = 0
     fase_anterior = None
 
     try:
         with open(ARQUIVO_CSV, "a", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
             if not arquivo_existe:
-                writer.writerow(CABECALHO)
+                writer.writerow(cabecalho)
 
             while True:
                 if ser.in_waiting:
                     linha = ser.readline().decode("utf-8", errors="ignore").strip()
-
-                    # Eventos do firmware (linhas que começam com >>>)
-                    if linha.startswith(">>>"):
-                        print(f"\n{'='*60}")
-                        print(f"[EVENTO] {linha[4:].strip()}")
-                        print(f"{'='*60}\n")
+                    if not linha:
                         continue
 
-                    dados = extrair_dados(linha)
-                    if dados:
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    # Mensagens de evento do firmware
+                    if linha.startswith(">>>"):
+                        print(f"\n{'='*55}")
+                        print(f"  {linha[3:].strip()}")
+                        print(f"{'='*55}\n")
+                        continue
+
+                    dados = extrair(linha)
+                    if not dados:
+                        continue
+
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    amostras += 1
+
+                    # ── Gravar CSV ──
+                    if MODO == 1:
+                        writer.writerow([
+                            timestamp,
+                            dados["temperatura"],
+                            dados["dc_temp"],
+                            dados["dc_cooler"],
+                        ])
+                        csvfile.flush()
+                        print(
+                            f"[{timestamp}] #{amostras:4d} | "
+                            f"Temp: {dados['temperatura']:6.2f} C | "
+                            f"DC_Temp: {dados['dc_temp']:3d}% | "
+                            f"DC_Cooler: {dados['dc_cooler']:3d}%"
+                        )
+
+                    elif MODO == 3:
+                        writer.writerow([
+                            timestamp,
+                            dados["vazao"],
+                            dados["pulsos"],
+                            dados["dc_temp"],
+                            dados["dc_cooler"],
+                        ])
+                        csvfile.flush()
+                        print(
+                            f"[{timestamp}] #{amostras:4d} | "
+                            f"Vazao: {dados['vazao']:6.2f} L/min | "
+                            f"Pulsos: {dados['pulsos']:3d} | "
+                            f"DC_Temp: {dados['dc_temp']:3d}% | "
+                            f"DC_Cooler: {dados['dc_cooler']:3d}%"
+                        )
+
+                    else:
                         writer.writerow([
                             timestamp,
                             dados["temperatura"],
@@ -132,32 +235,28 @@ def main():
                         ])
                         csvfile.flush()
 
-                        # Cabeçalho de fase ao trocar
+                        # Aviso de troca de fase
                         if dados["fase"] != fase_anterior:
-                            descricao = LABEL_FASE.get(dados["fase"], dados["fase"])
-                            print(f"\n--- Fase: {descricao} ---")
+                            print(f"\n--- Fase: {dados['fase']} ---")
                             fase_anterior = dados["fase"]
 
-                        # Barra de progresso de estabilização
-                        n   = dados["estab_contagem"]
+                        n    = dados["estab_contagem"]
                         alvo = dados["estab_alvo"]
                         barra = "#" * n + "." * max(0, alvo - n)
-
                         print(
-                            f"[{timestamp}] "
+                            f"[{timestamp}] #{amostras:4d} | "
                             f"Temp: {dados['temperatura']:6.2f} C | "
                             f"SP: {dados['sp_temperatura']:.1f} C | "
+                            f"Fase: {dados['fase']:<12} | "
                             f"Estab: [{barra}] {n}/{alvo} | "
                             f"Vazao: {dados['vazao']:.2f} L/min | "
-                            f"SP_Vz: {dados['sp_vazao']:.1f} | "
-                            f"Cooler: {dados['dc_cooler']:3d}% | "
-                            f"Resist: {dados['dc_resistencia']:3d}%"
+                            f"Cooler: {dados['dc_cooler']:3d}%"
                         )
 
-                time.sleep(0.1)
+                time.sleep(0.05)
 
     except KeyboardInterrupt:
-        print("\nEncerrado pelo usuário.")
+        print(f"\nEncerrado. {amostras} amostras gravadas em {ARQUIVO_CSV}")
     finally:
         ser.close()
         print("Porta serial fechada.")
