@@ -1,7 +1,7 @@
 """
 Captura dados do ESP32 via Serial e grava em CSV.
 
-Suporta tres formatos de firmware:
+Suporta quatro formatos de firmware:
 
   [1] Ensaio open-loop temperatura (PWM_Temp=100%, Cooler=0%):
         Temp: 35.50 C | DC_Temp: 100% | DC_Cooler: 0%
@@ -13,6 +13,10 @@ Suporta tres formatos de firmware:
 
   [3] Ensaio open-loop fluxo (PWM_Temp=0%, Cooler=100%):
         Vazao: 3.20 L/min | Pulsos: 24 | DC_Temp: 0% | DC_Cooler: 100%
+
+  [4] Ensaio degrau: Resist. 100% -> estabilizar -> Cooler 100% -> estabilizar:
+        Temp: 52.10 C | Fase: COOLER_MAX | Estab: 3/5 |
+        Vazao: 2.50 L/min | DC_Temp: 100% | DC_Cooler: 100%
 """
 
 import serial
@@ -23,15 +27,16 @@ from typing import Optional
 import time
 
 # ── Configuracoes ──────────────────────────────────────────────────────────────
-PORTA_SERIAL = "COM6"
+PORTA_SERIAL = "COM7"
 BAUD_RATE    = 115200
 
-# Modo 1: open-loop temperatura  |  Modo 2: PID  |  Modo 3: open-loop fluxo
-MODO = 3
+# Modo 1: open-loop temp  |  2: PID  |  3: open-loop fluxo  |  4: degrau resist+cooler
+MODO = 4
 ARQUIVO_CSV = {
     1: "dados_ensaio_openloop_temp.csv",
     2: "dados_ensaio_variacao_sp.csv",
     3: "dados_ensaio_openloop_fluxo.csv",
+    4: "dados_ensaio_degrau_cooler.csv",
 }.get(MODO, "dados_ensaio.csv")
 
 
@@ -49,6 +54,30 @@ def extrair_openloop(linha: str) -> Optional[dict]:
             "temperatura": float(m.group(1)),
             "dc_temp":     int(m.group(2)),
             "dc_cooler":   int(m.group(3)),
+        }
+    return None
+
+
+def extrair_degrau(linha: str) -> Optional[dict]:
+    """Formato: Temp: 52.10 C | Fase: COOLER_MAX | Estab: 3/5 | Vazao: 2.50 L/min | DC_Temp: 100% | DC_Cooler: 100%"""
+    padrao = (
+        r"Temp:\s*([-\d.]+)\s*C\s*\|\s*"
+        r"Fase:\s*(\w+)\s*\|\s*"
+        r"Estab:\s*(\d+)/(\d+)\s*\|\s*"
+        r"Vazao:\s*([-\d.]+)\s*L/min\s*\|\s*"
+        r"DC_Temp:\s*(\d+)%\s*\|\s*"
+        r"DC_Cooler:\s*(\d+)%"
+    )
+    m = re.search(padrao, linha)
+    if m:
+        return {
+            "temperatura":    float(m.group(1)),
+            "fase":           m.group(2),
+            "estab_contagem": int(m.group(3)),
+            "estab_alvo":     int(m.group(4)),
+            "vazao":          float(m.group(5)),
+            "dc_temp":        int(m.group(6)),
+            "dc_cooler":      int(m.group(7)),
         }
     return None
 
@@ -118,6 +147,17 @@ CABECALHO_FLUXO = [
     "dc_cooler_%",
 ]
 
+CABECALHO_DEGRAU = [
+    "timestamp",
+    "temperatura_C",
+    "fase",
+    "estab_contagem",
+    "estab_alvo",
+    "vazao_L_min",
+    "dc_temp_%",
+    "dc_cooler_%",
+]
+
 CABECALHO_PID = [
     "timestamp",
     "temperatura_C",
@@ -135,7 +175,12 @@ CABECALHO_PID = [
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
-    modo_str = {1: "open-loop temperatura", 2: "PID variacao de SP", 3: "open-loop fluxo"}.get(MODO, "?")
+    modo_str = {
+        1: "open-loop temperatura",
+        2: "PID variacao de SP",
+        3: "open-loop fluxo",
+        4: "degrau: resist. 100% -> cooler 100%",
+    }.get(MODO, "?")
     print(f"Modo: {modo_str}")
     print(f"Porta: {PORTA_SERIAL} | Baud: {BAUD_RATE}")
     print(f"Arquivo de saida: {ARQUIVO_CSV}\n")
@@ -147,8 +192,8 @@ def main():
         print(f"Erro ao abrir porta serial: {e}")
         return
 
-    cabecalho = {1: CABECALHO_OPENLOOP, 2: CABECALHO_PID, 3: CABECALHO_FLUXO}[MODO]
-    extrair   = {1: extrair_openloop,   2: extrair_pid,   3: extrair_fluxo  }[MODO]
+    cabecalho = {1: CABECALHO_OPENLOOP, 2: CABECALHO_PID, 3: CABECALHO_FLUXO, 4: CABECALHO_DEGRAU}[MODO]
+    extrair   = {1: extrair_openloop,   2: extrair_pid,   3: extrair_fluxo,   4: extrair_degrau  }[MODO]
 
     arquivo_existe = False
     try:
@@ -198,6 +243,36 @@ def main():
                         print(
                             f"[{timestamp}] #{amostras:4d} | "
                             f"Temp: {dados['temperatura']:6.2f} C | "
+                            f"DC_Temp: {dados['dc_temp']:3d}% | "
+                            f"DC_Cooler: {dados['dc_cooler']:3d}%"
+                        )
+
+                    elif MODO == 4:
+                        writer.writerow([
+                            timestamp,
+                            dados["temperatura"],
+                            dados["fase"],
+                            dados["estab_contagem"],
+                            dados["estab_alvo"],
+                            dados["vazao"],
+                            dados["dc_temp"],
+                            dados["dc_cooler"],
+                        ])
+                        csvfile.flush()
+
+                        if dados["fase"] != fase_anterior:
+                            print(f"\n--- Fase: {dados['fase']} ---")
+                            fase_anterior = dados["fase"]
+
+                        n    = dados["estab_contagem"]
+                        alvo = dados["estab_alvo"]
+                        barra = "#" * n + "." * max(0, alvo - n)
+                        print(
+                            f"[{timestamp}] #{amostras:4d} | "
+                            f"Temp: {dados['temperatura']:6.2f} C | "
+                            f"Fase: {dados['fase']:<12} | "
+                            f"Estab: [{barra}] {n}/{alvo} | "
+                            f"Vazao: {dados['vazao']:.2f} L/min | "
                             f"DC_Temp: {dados['dc_temp']:3d}% | "
                             f"DC_Cooler: {dados['dc_cooler']:3d}%"
                         )
