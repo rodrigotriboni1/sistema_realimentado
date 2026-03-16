@@ -7,9 +7,22 @@ Gera funções de transferência separadas:
 import csv
 from datetime import datetime
 from typing import Tuple
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import curve_fit
+
+DATA_RAW_DIR = Path("data/raw")
+DATA_PROCESSED_DIR = Path("data/processed")
+PLOTS_DIR = Path("plots")
+
+
+def caminho_entrada(nome_arquivo: str) -> Path:
+    """Usa data/raw por padrão, com fallback para compatibilidade na raiz."""
+    caminho_padrao = DATA_RAW_DIR / nome_arquivo
+    if caminho_padrao.exists():
+        return caminho_padrao
+    return Path(nome_arquivo)
 
 
 def carregar_csv(arquivo: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -98,12 +111,14 @@ def ft_temperatura(arquivo: str = "dados_temperatura_resistencia.csv"):
     print(f"\n  G_T(s) = {K:.4f} * exp(-{L:.2f}*s) / ({tau:.2f}*s + 1)")
 
     # Salvar e plotar
-    with open("dados_ft_temperatura.csv", "w", newline="", encoding="utf-8") as f:
+    DATA_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    arquivo_saida = DATA_PROCESSED_DIR / "dados_ft_temperatura.csv"
+    with open(arquivo_saida, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["tempo_s", "delta_T_C", "temperatura_C"])
         for i in range(len(t)):
             w.writerow([t[i], y[i], temp[i]])
-    print(f"\nDados salvos em dados_ft_temperatura.csv")
+    print(f"\nDados salvos em {arquivo_saida}")
 
     return t, y, K, tau, L, "temperatura"
 
@@ -137,22 +152,26 @@ def ft_fluxo(arquivo: str = "dados_fluxo.csv"):
     print(f"  L = {L:.2f} s")
     print(f"\n  G_F(s) = {K:.4f} * exp(-{L:.2f}*s) / ({tau:.2f}*s + 1)")
 
-    with open("dados_ft_fluxo.csv", "w", newline="", encoding="utf-8") as f:
+    DATA_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    arquivo_saida = DATA_PROCESSED_DIR / "dados_ft_fluxo.csv"
+    with open(arquivo_saida, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["tempo_s", "delta_vazao_L_min", "vazao_L_min"])
         for i in range(len(t)):
             w.writerow([t[i], y[i], vazao[i]])
-    print(f"\nDados salvos em dados_ft_fluxo.csv")
+    print(f"\nDados salvos em {arquivo_saida}")
 
     return t, y, K, tau, L, "fluxo"
 
 
 def main():
     # FT Temperatura (resistência -> temperatura)
-    t1, y1, K1, tau1, L1, _ = ft_temperatura("dados_temperatura_resistencia.csv")
+    arq_temp = caminho_entrada("dados_temperatura_resistencia.csv")
+    arq_fluxo = caminho_entrada("dados_fluxo.csv")
+    t1, y1, K1, tau1, L1, _ = ft_temperatura(str(arq_temp))
 
     # FT Fluxo (cooler -> vazão)
-    t2, y2, K2, tau2, L2, _ = ft_fluxo("dados_fluxo.csv")
+    t2, y2, K2, tau2, L2, _ = ft_fluxo(str(arq_fluxo))
 
     # Gráficos
     try:
@@ -171,7 +190,7 @@ def main():
         axes[0, 0].grid(True)
 
         # Temperatura - sinal completo
-        tempo1, temp1, _, _, _ = carregar_csv("dados_temperatura_resistencia.csv")
+        tempo1, temp1, _, _, _ = carregar_csv(str(arq_temp))
         axes[0, 1].plot(tempo1, temp1, "g-")
         axes[0, 1].set_xlabel("Tempo (s)")
         axes[0, 1].set_ylabel("Temperatura (°C)")
@@ -189,7 +208,7 @@ def main():
         axes[1, 0].grid(True)
 
         # Fluxo - sinal completo
-        tempo2, _, vazao2, _, _ = carregar_csv("dados_fluxo.csv")
+        tempo2, _, vazao2, _, _ = carregar_csv(str(arq_fluxo))
         axes[1, 1].plot(tempo2, vazao2, "g-")
         axes[1, 1].set_xlabel("Tempo (s)")
         axes[1, 1].set_ylabel("Vazão (L/min)")
@@ -197,8 +216,10 @@ def main():
         axes[1, 1].grid(True)
 
         plt.tight_layout()
-        plt.savefig("ft_temperatura_fluxo.png", dpi=150)
-        print("\nGráfico salvo em ft_temperatura_fluxo.png")
+        PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+        output_path = PLOTS_DIR / "ft_temperatura_fluxo.png"
+        plt.savefig(output_path, dpi=150)
+        print(f"\nGráfico salvo em {output_path}")
     except ImportError:
         print("\n(Instale matplotlib para gráficos: pip install matplotlib)")
 

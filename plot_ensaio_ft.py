@@ -3,12 +3,21 @@ Gráfico do ensaio com perfil de setpoints: 40 °C → 50 °C → 35 °C
 """
 
 import sys
+from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 
-CSV_PATH = sys.argv[1] if len(sys.argv) > 1 else "dados_ensaio_ft.csv"
+DATA_RAW_DIR = Path("data/raw")
+PLOTS_DIR = Path("plots")
+DEFAULT_CSV = DATA_RAW_DIR / "dados_ensaio_ft.csv"
+LEGACY_CSV = Path("dados_ensaio_ft.csv")
+
+if len(sys.argv) > 1:
+    CSV_PATH = Path(sys.argv[1])
+else:
+    CSV_PATH = DEFAULT_CSV if DEFAULT_CSV.exists() else LEGACY_CSV
 SP_VAZAO  = 1.0
 
 # ── Leitura e preparo ──────────────────────────────────────────────────────────
@@ -115,6 +124,8 @@ fig.legend(handles=patches, loc="lower center", ncol=4,
            bbox_to_anchor=(0.5, 0.01))
 
 plt.tight_layout(rect=[0, 0.05, 1, 0.97])
-plt.savefig("grafico_ensaio_ft.png", dpi=150, bbox_inches="tight")
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+output_path = PLOTS_DIR / "grafico_ensaio_ft.png"
+plt.savefig(output_path, dpi=150, bbox_inches="tight")
 plt.show()
-print(f"Gráfico salvo em grafico_ensaio_ft.png ({len(df)} amostras, {df['tempo_min'].iloc[-1]:.1f} min)")
+print(f"Gráfico salvo em {output_path} ({len(df)} amostras, {df['tempo_min'].iloc[-1]:.1f} min)")

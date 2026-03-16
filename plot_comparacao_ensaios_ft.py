@@ -7,9 +7,17 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
+from pathlib import Path
 
-CSV_ORIGINAL = "dados_ensaio_ft.csv"
-CSV_FINAL = "dados_ensaio_ft_final.csv"
+DATA_RAW_DIR = Path("data/raw")
+PLOTS_DIR = Path("plots")
+
+CSV_ORIGINAL = DATA_RAW_DIR / "dados_ensaio_ft.csv"
+CSV_FINAL = DATA_RAW_DIR / "dados_ensaio_ft_final.csv"
+if not CSV_ORIGINAL.exists():
+    CSV_ORIGINAL = Path("dados_ensaio_ft.csv")
+if not CSV_FINAL.exists():
+    CSV_FINAL = Path("dados_ensaio_ft_final.csv")
 SP_VAZAO = 1.0
 CORES_ETAPA = {1: "#1a9641", 2: "#d7191c", 3: "#2b83ba"}
 
@@ -186,9 +194,11 @@ if trans_orig:
                framealpha=0.9, bbox_to_anchor=(0.5, 0.01))
 
 plt.tight_layout(rect=[0, 0.04, 1, 0.96])
-plt.savefig("grafico_comparacao_ensaios_ft.png", dpi=150, bbox_inches="tight")
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+output_path = PLOTS_DIR / "grafico_comparacao_ensaios_ft.png"
+plt.savefig(output_path, dpi=150, bbox_inches="tight")
 plt.show()
 
 print(f"Original: {len(df_orig)} amostras, {df_orig['tempo_min'].iloc[-1]:.1f} min")
 print(f"Final:    {len(df_final)} amostras, {df_final['tempo_min'].iloc[-1]:.1f} min")
-print("Gráfico salvo em grafico_comparacao_ensaios_ft.png")
+print(f"Gráfico salvo em {output_path}")

@@ -3,10 +3,19 @@ Gera gráficos do ensaio do sistema realimentado a partir do CSV.
 """
 
 import sys
+from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 
-CSV_PATH = sys.argv[1] if len(sys.argv) > 1 else "dados_ensaio_ft.csv"
+DATA_RAW_DIR = Path("data/raw")
+PLOTS_DIR = Path("plots")
+DEFAULT_CSV = DATA_RAW_DIR / "dados_ensaio_ft.csv"
+LEGACY_CSV = Path("dados_ensaio_ft.csv")
+
+if len(sys.argv) > 1:
+    CSV_PATH = Path(sys.argv[1])
+else:
+    CSV_PATH = DEFAULT_CSV if DEFAULT_CSV.exists() else LEGACY_CSV
 
 SP_TEMPERATURA = 40.0
 SP_VAZAO = 1.0
@@ -45,6 +54,8 @@ ax.legend(loc="center right")
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("grafico_ensaio.png", dpi=150)
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+output_path = PLOTS_DIR / "grafico_ensaio.png"
+plt.savefig(output_path, dpi=150)
 plt.show()
-print(f"Gráfico salvo em grafico_ensaio.png ({len(df)} amostras)")
+print(f"Gráfico salvo em {output_path} ({len(df)} amostras)")

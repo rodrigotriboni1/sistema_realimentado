@@ -8,11 +8,13 @@ import re
 from datetime import datetime
 from typing import Optional
 import time
+from pathlib import Path
 
 # Configurações
 PORTA_SERIAL = "COM7"
 BAUD_RATE = 115200
-ARQUIVO_CSV = "dados_ensaio_ft.csv"
+OUTPUT_DIR = Path("data/raw")
+ARQUIVO_CSV = OUTPUT_DIR / "dados_ensaio_ft.csv"
 
 
 def extrair_dados(linha: str) -> Optional[dict]:
@@ -53,6 +55,8 @@ def main():
         print(f"Erro ao abrir porta serial: {e}")
         print("Verifique a porta e se o ESP32 está conectado.")
         return
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Cria arquivo CSV com cabeçalho
     arquivo_existe = False

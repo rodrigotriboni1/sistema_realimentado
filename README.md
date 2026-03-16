@@ -154,6 +154,14 @@ Onde:
 | Arquivo | Descrição |
 |---|---|
 | `src/main.cpp` | Firmware ESP32 com os dois PIDs |
-| `serial_logger.py` | Captura dados da serial e salva em CSV |
-| `plot_ensaio.py` | Gera gráficos a partir do CSV |
-| `dados_ensaio_ft.csv` | Dados do ensaio (temperatura, vazão, duty cycles) |
+| `serial_logger.py` | Captura dados da serial e salva em `data/raw/` |
+| `plot_ensaio.py` | Gera gráfico do ensaio e salva em `plots/` |
+| `plot_ensaio_ft.py` | Gera gráfico do ensaio FT e salva em `plots/` |
+| `plot_comparacao_ensaios_ft.py` | Compara ensaios FT e salva em `plots/` |
+| `ft_temperatura_fluxo.py` | Identifica FTs, grava CSV em `data/processed/` e gráfico em `plots/` |
+
+### Pastas de dados e saídas
+
+- `data/raw/`: CSVs brutos de aquisição serial.
+- `data/processed/`: CSVs processados (identificação/ajustes).
+- `plots/`: gráficos gerados pelos scripts.
