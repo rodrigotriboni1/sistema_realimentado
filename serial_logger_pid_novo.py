@@ -1,9 +1,14 @@
 """
 Captura dados do experimento PID novo via serial e grava em CSV.
 
-Formato esperado (main.cpp):
+Formatos esperados (main.cpp):
 Temp: 38.50 C | SP_Temp: 40.0 C | Fase: AQUECENDO | Estab: 2/15 |
 Vazao: 0.00 L/min | SP_Vazao: 0.0 | DC_Cooler: 0% | DC_Resist: 75% | Resistencia: ON
+
+ou
+
+Temp: 31.42 C | SP_T: 40.0 | Fase: AQUECENDO | Estab: 0/15 |
+Vazao: 0.00 L/min | SP_V: 0.0 | DC_Cool: 0% | DC_Res: 0% | Resist: OFF
 """
 
 import csv
@@ -15,7 +20,7 @@ from typing import Optional
 import serial
 
 # Configuracoes
-PORTA_SERIAL = "COM7"
+PORTA_SERIAL = "COM8"
 BAUD_RATE = 115200
 ARQUIVO_CSV = "dados_ensaio_pid_novo.csv"
 
@@ -23,30 +28,30 @@ ARQUIVO_CSV = "dados_ensaio_pid_novo.csv"
 def extrair_pid_novo(linha: str) -> Optional[dict]:
     padrao = (
         r"Temp:\s*([-\d.]+)\s*C\s*\|\s*"
-        r"SP_Temp:\s*([-\d.]+)\s*C\s*\|\s*"
+        r"(?:SP_Temp|SP_T):\s*([-\d.]+)(?:\s*C)?\s*\|\s*"
         r"Fase:\s*(\w+)\s*\|\s*"
         r"Estab:\s*(\d+)/(\d+)\s*\|\s*"
         r"Vazao:\s*([-\d.]+)\s*L/min\s*\|\s*"
-        r"SP_Vazao:\s*([-\d.]+)\s*\|\s*"
-        r"DC_Cooler:\s*(\d+)%\s*\|\s*"
-        r"DC_Resist:\s*(\d+)%\s*\|\s*"
-        r"Resistencia:\s*(ON|OFF)"
+        r"(?:SP_Vazao|SP_V):\s*([-\d.]+)\s*\|\s*"
+        r"(?:DC_Cooler|DC_Cool):\s*(\d+)%\s*\|\s*"
+        r"(?:DC_Resist|DC_Res):\s*(\d+)%\s*\|\s*"
+        r"(?:Resistencia|Resist):\s*(ON|OFF)"
     )
-    m = re.search(padrao, linha)
+    m = re.search(padrao, linha, flags=re.IGNORECASE)
     if not m:
         return None
 
     return {
         "temperatura": float(m.group(1)),
         "sp_temperatura": float(m.group(2)),
-        "fase": m.group(3),
+        "fase": m.group(3).upper(),
         "estab_contagem": int(m.group(4)),
         "estab_alvo": int(m.group(5)),
         "vazao": float(m.group(6)),
         "sp_vazao": float(m.group(7)),
         "dc_cooler": int(m.group(8)),
         "dc_resistencia": int(m.group(9)),
-        "resistencia": m.group(10),
+        "resistencia": m.group(10).upper(),
     }
 
 

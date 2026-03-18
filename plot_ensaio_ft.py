@@ -13,15 +13,37 @@ SP_VAZAO  = 1.0
 
 # ── Leitura e preparo ──────────────────────────────────────────────────────────
 df = pd.read_csv(CSV_PATH)
-df.columns = [
-    "timestamp", "temperatura", "sp_temperatura",
-    "etapa", "vazao", "dc_cooler", "dc_resistencia", "resistencia",
-]
+
+if len(df.columns) == 8:
+    # Formato antigo FT
+    df.columns = [
+        "timestamp", "temperatura", "sp_temperatura",
+        "etapa", "vazao", "dc_cooler", "dc_resistencia", "resistencia",
+    ]
+    if "sp_vazao" not in df.columns:
+        df["sp_vazao"] = SP_VAZAO
+elif len(df.columns) == 11:
+    # Formato novo PID
+    df.columns = [
+        "timestamp", "temperatura", "sp_temperatura", "fase",
+        "estab_contagem", "estab_alvo",
+        "vazao", "sp_vazao", "dc_cooler", "dc_resistencia", "resistencia",
+    ]
+    mapa_fase = {"AQUECENDO": 1, "COOLER_ON": 2, "ESTABILIZADO": 3}
+    df["etapa"] = df["fase"].map(mapa_fase).fillna(0).astype(int)
+else:
+    raise ValueError(
+        f"Formato de CSV nao suportado ({len(df.columns)} colunas). "
+        "Esperado: 8 (FT) ou 11 (PID novo)."
+    )
+
 df["timestamp"] = pd.to_datetime(df["timestamp"])
 df["tempo_min"] = (df["timestamp"] - df["timestamp"].iloc[0]).dt.total_seconds() / 60.0
 
-# Instantes de transição entre etapas
-transicoes = df[df["etapa"].diff() != 0]["tempo_min"].tolist()[1:]  # remove t=0
+# Instantes de transicao (mudanca no setpoint de temperatura ou etapa/fase)
+mudanca_sp = df["sp_temperatura"].diff().fillna(0) != 0
+mudanca_etapa = df["etapa"].diff().fillna(0) != 0
+transicoes = df[mudanca_sp | mudanca_etapa]["tempo_min"].tolist()[1:]  # remove t=0
 
 # ── Figura ─────────────────────────────────────────────────────────────────────
 CORES_ETAPA = {1: "#1a9641", 2: "#d7191c", 3: "#2b83ba"}
@@ -38,9 +60,13 @@ def marcar_transicoes(ax):
         ax.axvline(t, color="gray", linestyle=":", linewidth=1.0, alpha=0.7)
 
 def sombrear_etapas(ax):
-    """Faixas coloridas de fundo por etapa."""
+    """Faixas coloridas de fundo por etapa (robusto para 1..N segmentos)."""
     limites = [0.0] + transicoes + [df["tempo_min"].iloc[-1]]
-    for i, etapa in enumerate([1, 2, 3]):
+    if len(limites) < 2:
+        return
+    etapas_ciclo = [1, 2, 3]
+    for i in range(len(limites) - 1):
+        etapa = etapas_ciclo[i % len(etapas_ciclo)]
         ax.axvspan(limites[i], limites[i + 1],
                    alpha=0.06, color=CORES_ETAPA[etapa], zorder=0)
 
@@ -55,9 +81,12 @@ ax.step(df["tempo_min"], df["sp_temperatura"],
         color="black", linewidth=1.4, linestyle="--",
         where="post", label="Setpoint (perfil)", zorder=4)
 
-# Anotações dos setpoints
-for sp, t in zip([40, 50, 35], [0.0] + transicoes):
-    ax.annotate(f"SP = {sp} °C",
+# Anotacoes dos setpoints (conforme dados)
+sp_pts = df.loc[mudanca_sp | (df.index == 0), ["tempo_min", "sp_temperatura"]]
+for _, row in sp_pts.iterrows():
+    t = row["tempo_min"]
+    sp = row["sp_temperatura"]
+    ax.annotate(f"SP = {sp:.1f} °C",
                 xy=(t, sp), xytext=(t + 0.4, sp + 0.8),
                 fontsize=8.5, color="black",
                 arrowprops=dict(arrowstyle="->", color="black", lw=0.8))
@@ -76,8 +105,12 @@ media_vazao = df["vazao"].mean()
 
 ax.plot(df["tempo_min"], df["vazao"],
         color="#1f77b4", linewidth=0.9, label="Vazão medida", zorder=3)
-ax.axhline(SP_VAZAO, color="#1f77b4", linestyle="--",
-           linewidth=1.4, alpha=0.8, label=f"Setpoint ({SP_VAZAO} L/min)", zorder=4)
+if "sp_vazao" in df.columns:
+    ax.step(df["tempo_min"], df["sp_vazao"], color="#1f77b4", linestyle="--",
+            where="post", linewidth=1.4, alpha=0.8, label="Setpoint de vazao", zorder=4)
+else:
+    ax.axhline(SP_VAZAO, color="#1f77b4", linestyle="--",
+               linewidth=1.4, alpha=0.8, label=f"Setpoint ({SP_VAZAO} L/min)", zorder=4)
 ax.axhline(media_vazao, color="#9467bd", linestyle="-.",
            linewidth=1.4, alpha=0.9, label=f"Média ({media_vazao:.2f} L/min)", zorder=4)
 
